@@ -1,0 +1,71 @@
+# 五道门禁：判据、命令、纪律
+
+每道门禁可脚本化、有退出码。全部 PASS 才允许交付。命令里的 python 均为
+`~/.workbuddy/binaries/python/envs/default/bin/python`。
+
+## G1 切片器判决（唯一权威）
+
+`bake_project.py` 内置。核心是 `result.json → sliced_plates[0].warning_message`：
+
+- `""`（空串）= 通过；`"..."` = 报警（内容即 GUI 橙色条原文，点名对象）；
+- **`None`（文件不存在/未落盘）= 没判决 = 失败**。三态必须严格区分——
+  轮询到 `baked.3mf` 就杀进程会赶不上判决落盘（它最后才写），`not None` 为真的话
+  一个从未判决的切片会被当成"通过"并覆盖交付文件。已交付文件必须**独立复切**
+  复核，不采信烘焙当场的读数。
+- 判决内容是**两条独立规则**：① 首层接触面积过小（点接触型）；
+  ② 连续 ≥2 层的浮空体积超阈值（中段悬空型）。单层浮空 = 桥接，不算。
+- **每盘只记第一条**告警：修完一件后警告跳到下一件是正常现象，不是"修了还报"。
+- `--orient` 会让 `warning_message` 说谎，判决只对纯 `--slice 1` 有效。
+
+## G2 朝向判决
+
+- 离线指标（首层接触、浮空体积、凸包 `footprint()`）**只用来排序，不当判决**：
+  凸包口径两个方向都会错（实测同一件虚高 8 倍 / 虚低 4 倍，虚高会放过刀尖姿态）。
+- 终局用 `pose_brute.py` 切片器黑箱：单件 45 mm 一次约 1.4 s，整球面 240 姿态
+  8 进程约 65 s。结果通常双峰：有解 → 换 `orient="face"` + `dirvec`；
+  无解 → 对象级树形支撑（`SUPPORT` 表，`enable_support=1 / support_type=tree(auto) /
+  support_threshold_angle=30`，process 全局 `enable_support` 保持 0）。
+- **`orient="face"` 的 `dirvec` 是相对量**：候选 STL 已在 `lay_flat` 坐标系里，
+  正确实现是 `base, T = lay_flat(mesh); upright(base, -dirvec)`。当成机架绝对
+  方向会转两次（实测落到 16.1 mm 高而不是 10.7，且照样报警）。
+- 参考工具输出时警惕"还没写完"：`result.json` 读取要带重试 + `judged` 标志。
+
+## G3 逐层悬空扫描（抓第④类报废）
+
+`overhang.py <盘或件> [--json out.json]`，逐层算截面突增：
+
+- 抓的是**切片器不报警、首层门禁也不报**的报废：件中部的水平台阶——
+  截面半径一层内从 r1 跳到 r2，整圈悬空（Winston 实测单层 +406 mm²，打出来
+  是颈口一圈细丝乱团）。修复手段是 45° 肩台（锥台两端各埋 3 mm 进相邻实体），
+  顺带修掉共面布尔静默失效。
+- 默认阈值 `--area-warn 150 --span-warn 3.0 --darea-warn 25`；交付前用
+  2.5 倍严（60 / 2.0 / 15）再压一遍，确认没有踩线件。
+- `01 底座` 这类空腔件走 `area-only` 兜底路径时，`polygons_full` 会把空腔
+  返回成独立多边形——用 `q.covers(p.representative_point())` 滤掉被兄弟
+  多边形包住的，否则内腔顶棚被虚报成外露悬空。
+
+## G4 翘边
+
+`warp.py`：`contact`（接地凸包面积）/ `span`（底面最长跨度）/
+`depth`（件体积 ÷ 接地面积，**不能用包围盒或顶点 z 范围**——圆柱会被估成薄片）。
+判据 `lift = span²/depth`（平方律）：≤400 ok；400–1200 → brim + 前 3 层关风扇；
+**>1200 → 改模型别调参**；`depth ≤ 4.5` 薄片强制 brim。退出码可当 CI 门禁。
+
+## G5 连通性与克重
+
+- 连通性：`audit_3mf.py` 自解析顶点索引建 `Trimesh(process=False)`（**别用
+  `trimesh.load()`**，自动修复会把好件判成散件）；以切片器 `--info` 的
+  `number_of_parts` 收口（每件应为 1；`<basematerials>` 不被 Bambu 读，
+  颜色靠 `Metadata/model_settings.config` 的 `extruder` 槽位）。
+- 克重：`weigh_3mf.py` 对比内嵌 `slice_info` 预测与 gcode footer；耗材密度
+  必须走 `inherits` 链解析（手填密度是 1.6% 谎报）。
+- 交付前对每个 3mf **独立复切**（G1）+ **独立 overhang 扫描**（G3），
+  两者都自己跑，不读流水线中间产物。
+
+## 纪律（跨门禁）
+
+1. 失败的切片会伪装成干净通过——任何"没读到"都算失败。
+2. 不采信任何中间结果文件；复核一律重跑。
+3. 门禁改过的交付文件必须从备份恢复点可回滚（改前先备份六个交付件）。
+4. 重跑建模脚本会覆盖全部交付文件——每次只把改动的盘同步进交付目录，
+   其余从备份恢复。
