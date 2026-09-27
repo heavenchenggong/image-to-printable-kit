@@ -157,24 +157,24 @@ def profile(spec, verbose=True):
 
     if verbose:
         print(f"\n=== {label} ===")
-        print(f"  销身 Ø{res['body']:.2f}  珠 Ø{res['bead']:.2f}  孔 Ø{res['bore']:.2f}"
-              f"   长度 {L} + {cone} 锥")
-        print(f"  体间隙 {res['min_clear']:+.3f} /边   珠握持 {res['grip']:.3f} /边"
+        print(f"  body Ø{res['body']:.2f}  bead Ø{res['bead']:.2f}  bore Ø{res['bore']:.2f}"
+              f"   length {L} + {cone} cone")
+        print(f"  body clearance {res['min_clear']:+.3f} /side   bead grip {res['grip']:.3f} /side"
               f" @ z={res['z_grip'] if res['z_grip'] is None else round(res['z_grip'],1)}")
-        print(f"  销尖 z={res['peg_tip']:.2f}  孔底 z={res['bore_bottom']:.2f}"
-              f"   轴向余量 {res['axial_gap']:.2f} mm")
-        print(f"  叶片应变 {100*eps:.2f} %  {'OK' if ok_strain else '>2% 会定型失效'}"
-              f"   水密 {res['watertight']}")
+        print(f"  peg tip z={res['peg_tip']:.2f}  bore bottom z={res['bore_bottom']:.2f}"
+              f"   axial margin {res['axial_gap']:.2f} mm")
+        print(f"  leaf strain {100*eps:.2f} %  {'OK' if ok_strain else '>2% takes a set and fails'}"
+              f"   watertight {res['watertight']}")
         print(f"  -> {'PASS' if res['ok'] else 'FAIL'}")
     return res
 
 
 CASES = [
-    dict(label="手腕 手<->臂", r_body=2.275, r_bead=2.50, bore=2.40,
+    dict(label="wrist hand<->arm", r_body=2.275, r_bead=2.50, bore=2.40,
          length=4.5, cone=1.5, slit_w=0.7, slit_depth=4.0, relief_r=0.9, bury=2.5),
-    dict(label="瞳孔 瞳<->眼片", r_body=1.975, r_bead=2.175, bore=2.075,
+    dict(label="pupil pupil<->eye-plate", r_body=1.975, r_bead=2.175, bore=2.075,
          length=4.0, cone=1.2, slit_w=0.6, slit_depth=3.4, relief_r=0.75, bury=2.0),
-    dict(label="耳鳍 耳<->身体", r_body=2.95, r_bead=3.225, bore=3.10,
+    dict(label="ear-fin ear<->body", r_body=2.95, r_bead=3.225, bore=3.10,
          length=6.0, cone=1.8, slit_w=0.8, slit_depth=5.0, relief_r=0.8, bury=2.5),
 ]
 

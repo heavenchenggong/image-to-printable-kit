@@ -1,25 +1,25 @@
-# 翘边：先改模型，再动参数
+# Warping: fix the model first, then touch parameters
 
-一份"底部长这样"的排查顺序。**90% 的翘边是几何问题，只有 10% 是切片参数问题**——
-把顺序搞反，就会陷入"把首层速度从 50 调到 20、再从 20 调到 15"的无限循环。
+A triage order for "what the bottom looks like". **90% of warping is a geometry problem; only 10% is slicer settings** —
+get the order backwards and you end up in the infinite loop of "first-layer speed from 50 to 20, then 20 to 15".
 
-## 一、先看坏在哪，决定要不要碰几何
+## 1. Triage by where it fails, before touching geometry
 
-对着失败的照片/实物，按坏的位置分诊：
+Look at the photo / the physical part, classify by failure location:
 
-| 坏的位置 | 根因 | 处理 |
+| Failure location | Root cause | Action |
 |---|---|---|
-| **一条长直边**沿线糊、拉丝、料堆积 | 几何。长边的收缩应力超过截面刚度，边缘翘起，喷嘴每趟都刮过去 | **改模型**，见第二节 |
-| 贴着底的**整片**没粘上／被推走 | 参数。Z offset 太高、首层太慢太快、板有油 | 参数，见第三节 |
-| **尖角／四角**单独翘起 | 几何 + 参数各一半 | 加圆角 R2–3 + brim |
-| 一条**细丝**横跨空处 | 拉丝，和翘边无关。回抽不足或料受潮 | PETG 回抽 4–6 mm、70℃ 烘干 4 h |
-| 边缘一圈**外鼓**（象脚） | 热床把前几层泡软了，上层压出去 | 象脚补偿 0.15 mm，或热床降 5℃ |
+| **One long straight edge** going mushy, stringing, piling material | Geometry. Shrinkage stress along the long edge exceeds section stiffness, the edge lifts, the nozzle scrapes it every pass | **Fix the model**, see section 2 |
+| The **whole patch** touching the bed not sticking / shoved off | Settings. Z offset too high, first layer too slow or too fast, oily plate | Settings, see section 3 |
+| **Sharp corners / all four corners** lifting on their own | Half geometry, half settings | Add R2–3 fillets + brim |
+| A **thin thread** spanning a gap | Stringing, unrelated to warping. Insufficient retraction or wet filament | PETG retraction 4–6 mm, dry 4 h at 70℃ |
+| Rim **bulging outward** (elephant foot) | Hot bed softens the first layers; upper layers press the material out | Elephant foot compensation 0.15 mm, or bed −5℃ |
 
-Winston v1 校验件的失败是**第一行**：底板的 102 mm 长边。
+Winston v1's coupon failure was **row one**: the plate's 102 mm long edge.
 
-## 二、几何：三个数字决定一切
+## 2. Geometry: three numbers decide everything
 
-先量，别猜。`scripts/warp.py` 直接给数：
+Measure first, don't guess. `scripts/warp.py` gives you the numbers directly:
 
 ```bash
 python <skill>/scripts/warp.py part.3mf
@@ -27,206 +27,207 @@ python <skill>/scripts/warp.py part.3mf
 
 ```
 part                    contact  span x  span y  depth   lift  band
-coupon v1（一整块板）      2856    102.0    28.0    6.0   1734  redesign
-coupon v1（Ø20 圆盘）       314     20.0    20.0    3.8    105  brim
-coupon v2（每个座）         172     14.8    14.8   21.0     10  ok
+coupon v1 (one plate)     2856    102.0    28.0    6.0   1734  redesign
+coupon v1 (Ø20 disc)       314     20.0    20.0    3.8    105  brim
+coupon v2 (each socket)    172     14.8    14.8   21.0     10  ok
 ```
 
-- **contact** — 接地面积，mm²。抓板力，也是收缩力的来源。
-- **span** — 底面在 X/Y 上**最长的连续直线跨度**，mm。这是力臂。
-- **depth** — 站在接地面上的**平均材料深度** = 件体积 ÷ 接地面积，mm。
-  抗弯靠的是它。**别用顶点包围盒去估厚度**：trimesh 的圆柱只有上下两端有顶点，
-  Ø16×18.5 的实心柱会被估成 0.6 mm 薄片；体积÷面积不会。
-- **lift = span² ÷ depth** — 判据就是它。
-  | 条件 | 判定 |
+- **contact** — ground area, mm². Grip on the plate, and also the source of shrinkage force.
+- **span** — the **longest continuous straight run** of the bottom face along X/Y, mm. This is the lever arm.
+- **depth** — the **average material depth** standing on the ground face = part volume ÷ contact area, mm.
+  Bending resistance comes from it. **Don't estimate thickness from the vertex bounding box**: a trimesh cylinder
+  only has vertices at its two end caps, so a Ø16×18.5 solid column gets estimated as a 0.6 mm sheet; volume ÷ area doesn't.
+- **lift = span² ÷ depth** — this is the criterion.
+  | Condition | Verdict |
   |---|---|
-  | span ≤ 15 mm | ok，收缩力没有力臂可拉 |
-  | lift ≤ 400 | ok，直接打 |
-  | depth ≤ 4.5 mm | 一律 brim（薄片是靠 brim 按住的，不是靠自己的刚度） |
-  | 400 < lift ≤ 1200 | brim 5–8 mm + 前 3 层关风扇 |
-  | lift > 1200 | **改模型，别调参** |
+  | span ≤ 15 mm | ok — shrinkage stress has no lever arm |
+  | lift ≤ 400 | ok, print as is |
+  | depth ≤ 4.5 mm | brim, always (thin plates are held down by brim, not by their own stiffness) |
+  | 400 < lift ≤ 1200 | brim 5–8 mm + fan off for the first 3 layers |
+  | lift > 1200 | **fix the model, don't tune settings** |
 
-### 为什么是 span 的**平方**，不是 span/depth
+### Why span **squared**, not span/depth
 
-残余翘起 h ∝ ε · span² / depth：随自由跨度的平方增长、随厚度线性下降。
+Residual lift h ∝ ε · span² / depth: grows with the square of the free span, falls linearly with thickness.
 
-**这一条踩过一次，代价是差点让好件返工。** 第一版判据写成 `ratio = span/depth`，
-于是把 **Ø35 × 2.8 的瞳孔薄片判成 "redesign"**，而那块真的打废了的 102 mm 底板判成 17.0。
-两者都"超线"，看起来一致，但风险差一个数量级：
+**This one cost us: it nearly sent good parts back for rework.** The first criterion was `ratio = span/depth`,
+which judged the **Ø35 × 2.8 pupil disc "redesign"**, while the plate that actually failed at 102 mm scored 17.0.
+Both "over the line", seemingly the same, but the risk differs by an order of magnitude:
 
-| | span | 相对风险（∝ span²） | lift |
+| | span | Relative risk (∝ span²) | lift |
 |---|---|---|---|
-| v1 底板 | 102 mm | 1.00 | **1734** |
-| 瞳孔 Ø35 | 35 mm | (35/102)² = **0.12** | **438** |
+| v1 plate | 102 mm | 1.00 | **1734** |
+| pupil Ø35 | 35 mm | (35/102)² = **0.12** | **438** |
 
-瞳孔只有底板风险的 **1/11**，加个 brim 就能打。**比值型判据分不出"小一号"和"小一个量级"。**
+The pupil carries only **1/11** of the plate's risk; a brim and it prints. **A ratio criterion can't tell "one size smaller" from "an order of magnitude smaller".**
 
-同时补一条下限：**depth ≤ 4.5 mm 的薄片一律 brim**，不管 lift 多低——
-它自己那点刚度不解决问题，是 brim 按住的。
+Also add a floor: **any plate with depth ≤ 4.5 mm gets brim**, no matter how low the lift —
+its own stiffness won't save it; brim holds it down.
 
-### 另一半：**它站得住吗**（COM 余量）
+### The other half: **will it stand up?** (COM margin)
 
-`warp.py` 现在同时报 **COM = 重心到接地轮廓边缘的余量**（mm）。
-**负 = 重心落在接地轮廓之外 = 这件会自己翻倒，切片器里完全看不出来。**
+`warp.py` now also reports **COM = margin from center of mass to the ground outline edge** (mm).
+**Negative = COM falls outside the ground outline = this part tips over on its own, and the slicer can't see it at all.**
 
-Winston 免胶版 / 胶接版一共被抓出三件：
+Three parts caught across Winston's glue-free / glued versions:
 
-| 件 | 原来的姿态 | 改成 |
+| Part | Original pose | Changed to |
 |---|---|---|
-| 05 犄角（免胶） | 靠法兰边缘的切点站着：接地 1 mm²，COM **−2.1 mm** | 法兰面着地，COM **+2.8**，接地 108 mm² |
-| 06 耳鳍（免胶） | 侧躺靠一条切线：接地 1 mm²，COM **−2.4 mm** | 凸包面着地，COM **+1.9**，接地 24 mm² |
-| 06 犄角（胶接） | 底面只有 **3 个顶点**碰板，最近的一圈顶点在 **0.55 mm 高处**，COM −1.6 | 装配面着地，COM **+4.5**，接地 78 mm²，且**不再需要支撑** |
+| 05 horn (glue-free) | Standing on the flange edge's tangent point: ground 1 mm², COM **−2.1 mm** | Flange face down, COM **+2.8**, ground 108 mm² |
+| 06 ear fin (glue-free) | Lying on one tangent line: ground 1 mm², COM **−2.4 mm** | Convex-hull face down, COM **+1.9**, ground 24 mm² |
+| 06 horn (glued) | Only **3 vertices** touching the plate, nearest ring of vertices **0.55 mm high**, COM −1.6 | Assembly face down, COM **+4.5**, ground 78 mm², and **no supports needed anymore** |
 
-**别用"接地面积"判断稳不稳**：圆柱躺下是**线接触**，面积≈0，但它稳得很；
-而一个桶可以有一大片接触面却只压在棱上。唯一诚实的判据是重心在不在接地轮廓内。
+**Don't judge stability by "contact area"**: a cylinder lying down has **line contact** — area ≈ 0, yet perfectly stable;
+while a barrel can have a large contact patch yet rest on one edge. The only honest criterion is whether COM is inside the ground outline.
 
-**修法：换姿态，不是调参数。** `splitter.rest_flat(m)` —— 刚体真正落座的位置是
-**凸包面**贴着板，所以直接在凸包面里搜"哪个面朝下"，要求重心落在轮廓内，
-再按接地面积／重心余量／高度／支撑量打分。`splitter.lay_flat()` 在结论"站不稳或
-余量 < 1 mm"时会**自动回退**到它，所以正常调用 `lay_flat` 就够。
+**Fix: change the pose, not the parameters.** `splitter.rest_flat(m)` — a rigid body truly rests with a
+**convex-hull face** against the plate, so search the convex-hull faces for "which one points down", require COM to land inside the outline,
+then score by ground area / COM margin / height / support volume. `splitter.lay_flat()` **auto-falls back** to it when
+the verdict is "can't stand or margin < 1 mm", so calling `lay_flat` normally is enough.
 
-#### ⚠️ 两把尺子：贴不贴板用 0.1 mm，稳不稳用 0.6–0.8 mm
+#### ⚠️ Two rulers: plate contact at 0.1 mm, COM balance at 0.6–0.8 mm
 
-**这是本类问题最贵的坑，值得单开一段。**
+**This is the most expensive pit in this problem class; it gets its own section.**
 
-`footprint(m, tol)` 的语义是"离板 `tol` 以内的顶点算接触，取它们的凸包当支撑多边形"。
-`tol` 一大，它就会**凭空造出一个零件没有的支撑面**。三个真实数字（胶接版 06 犄角）：
+`footprint(m, tol)` means "vertices within `tol` of the plate count as contact; their convex hull is the support polygon".
+With `tol` too big, it **invents a support surface the part doesn't have**. Three real numbers (glued 06 horn):
 
-| 容差 | 离板该距离内的顶点数 | 报出来的接地面积 | 读到的结论 |
+| Tolerance | Vertices within that distance of the plate | Reported ground area | Conclusion read out |
 |---|---|---|---|
-| **0.10 mm** | 5 | **0.07 mm²** | 它站在几个点上 |
-| 0.40 mm | 11 | 0.32 mm² | 还是几个点 |
-| 0.60 mm | 26 | 80.7 mm² | **"站得挺好"** ← 假的 |
-| 0.80 mm（`footprint` 默认） | 26 | 114.9 mm² | **"站得挺好"** ← 假的 |
+| **0.10 mm** | 5 | **0.07 mm²** | It stands on a few points |
+| 0.40 mm | 11 | 0.32 mm² | Still a few points |
+| 0.60 mm | 26 | 80.7 mm² | **"Standing fine"** ← false |
+| 0.80 mm (`footprint` default) | 26 | 114.9 mm² | **"Standing fine"** ← false |
 
-那 26 个顶点全在 **0.52–0.60 mm** 高处，离板还差半毫米。0.6 的尺子一量，
-一件**只有 3 个顶点碰板**的件就变成了"80 mm² 稳稳落座"，
-`rest_flat` 的触发条件根本不成立——所以它是**第二轮才被抓到的**。
+All 26 vertices sit **0.52–0.60 mm** high — half a millimeter short of the plate. Measured with the 0.6 ruler,
+a part with **only 3 vertices touching the plate** becomes "80 mm², seated solidly",
+and `rest_flat`'s trigger condition never holds — which is why it was **only caught in round two**.
 
-**分工明确，两个数写在 `splitter.py` 里：**
+**Division of labor; both numbers live in `splitter.py`:**
 
-- **`CONTACT_TOL = 0.10`** —— 判断"这个姿态到底有没有面贴板"。真正落座的面，
-  顶点就在 z ≈ 0。
-- **0.6–0.8 mm** —— 判断"重心偏不偏"（`footing_margin` / `footprint` 的默认值）。
-  这里要宽容一点：曲面件（圆柱躺下）本来就只沿着一条线接触，
-  收太紧会连它的支撑多边形都构不出来。
+- **`CONTACT_TOL = 0.10`** — judges "does this pose actually have a face touching the plate". A truly seated face
+  has vertices at z ≈ 0.
+- **0.6–0.8 mm** — judges "is COM off-center" (defaults of `footing_margin` / `footprint`).
+  Be lenient here: curved parts (a cylinder lying down) only ever contact along a line;
+  tightened too far, even their support polygon can't be constructed.
 
-**同一个量在门禁和摆位器里必须用同一把尺子**，否则会出现"门禁说会翻、摆位器说没问题"
-然后卡死——Winston 的耳鳍第一次重建就是这样纹丝不动的。
+**The same quantity must use the same ruler in both the gate and the packer**, or you get "the gate says it tips, the packer says it's fine"
+and deadlock — exactly how Winston's ear fin's first rebuild didn't move a millimeter.
 
-⚠️ **不要把求解器复制进项目脚本。** `snapkit_winston.py` 当初把 `lay_flat` 抄了一份，
-修库里的版本对脚本完全不生效（重建后两件姿态一模一样）。**求解器只能有一份。**
+⚠️ **Don't copy the solver into project scripts.** `snapkit_winston.py` carried its own copy of `lay_flat`;
+fixing the library version had zero effect on the script (both poses identical after rebuild). **The solver exists in exactly one copy.**
 
-### 四种改法，按性价比排
+### Four fixes, ranked by value
 
-1. **拆掉不承力的底板。** 最常见的一招。底板如果只是"把几个小件连成一个对象"，
-   它就是在拿一整个大平面的翘边风险去换一点取件方便。**问一句：这个底板真的在承力吗？**
-   Winston v1 → v2 就是删掉底板：接触面积 −65%，span 102 → 14.8 mm。
-2. **打断长边。** 在底面上开孔／开槽，把一条 100 mm 的连续边拆成几个岛。
-   收缩应力分布在多个小区域上，而不是沿线累积。（这也是"底部加浅网格"能奏效的原理。）
-3. **加厚。** 抗弯刚度 ∝ t³，2.5 → 4 mm 是 4 倍刚度。但对已经很宽的板，收益不如前两条。
-4. **倒角／圆角。** 平底板的**锐边**是整个底面最没支撑的地方，也是最先生锈翘起来的起点。
-   0.6 mm 的 45° 底倒角能同时消掉锐边、缩小接触面。
-   用 `ptools.chamfered_base(r, h, cham)`。
-   ⚠️ 倒角必须**切**出来，不能并上去——圆柱自己那一圈完整底面还在，
-   在底下并一个锥环等于什么都没做。
+1. **Remove non-load-bearing base plates.** The most common move. If a plate only "merges a few small parts into one object",
+   it's trading a whole large flat surface's warping risk for a bit of handling convenience. **Ask: is this plate actually load-bearing?**
+   Winston v1 → v2 was exactly deleting the plate: contact area −65%, span 102 → 14.8 mm.
+2. **Break long edges.** Cut holes / slots in the bottom face, splitting a 100 mm continuous edge into islands.
+   Shrinkage stress distributes over several small regions instead of accumulating along the edge.
+   (This is also why "shallow grid patterns on the bottom" work.)
+3. **Thicken.** Bending stiffness ∝ t³; 2.5 → 4 mm is 4× stiffness. But for already-wide plates it pays less than the first two.
+4. **Chamfer / round.** A flat plate's **sharp bottom edge** is the least supported spot on the whole bottom face, and where lifting starts first.
+   A 0.6 mm 45° base chamfer kills the sharp edge and shrinks the contact patch at once.
+   Use `ptools.chamfered_base(r, h, cham)`.
+   ⚠️ The chamfer must be **cut**, not unioned — the cylinder's own full circular bottom face is still there;
+   unioning a taper ring underneath accomplishes nothing.
 
-### 两个会静默丢连接的坑
+### Two traps that silently drop connections
 
-- **两个实体只"贴着"（共面）→ 布尔并集丢掉这条连接。** 所有销、柱、凸台
-  都要留 2–2.5 mm 的**埋入段**（体积真重叠），不能只是端面贴合。
-  Winston v1 的销颈 `bury` 正好等于底盘厚度，销的端面和底盘底面是同一个平面。
-- **锥台／圆柱的 `_at` 语义。** `trimesh.creation.cone` 的底面在 z=0（不是中心），
-  忘了 `-h/2` 会让零件从位置上悄悄脱开。
+- **Two solids merely "touching" (coplanar) → the boolean union drops the connection.** Every pin, post, boss
+  keeps a **2–2.5 mm buried section** (true volumetric overlap); end-face-to-end-face is not enough.
+  Winston v1's pin neck `bury` equaled exactly the plate thickness — the pin's end face and the plate's bottom face were the same plane.
+- **The `_at` semantics of frustums / cylinders.** `trimesh.creation.cone`'s base is at z=0 (not centered);
+  forgetting `-h/2` quietly detaches the part positionally.
 
-## 三、切片参数（Bambu Studio）
+## 3. Slicer settings (Bambu Studio)
 
-几何合格、lift 落在 400–1200 时，用这一套。**记顺序**：热床 → 风扇 → 摆放 → 速度。
-速度排在最后，因为它的作用最小。
+Use this set when geometry passes and lift lands in 400–1200. **Remember the order**: bed → fan → placement → speed.
+Speed is last because it matters least.
 
-| 位置 | 参数 | 值 | 为什么 |
+| Where | Parameter | Value | Why |
 |---|---|---|---|
-| 工艺 → 质量 → 精度 | **象脚补偿** | 0.15 mm | 消掉首层外鼓，配合几何倒角 |
-| 工艺 → 质量 | **初始层线宽** | 0.5 mm（约 120%） | 更宽的首层线 = 压得更实、抓得更牢 |
-| 工艺 → 冷却 | **前 N 层不吹风扇** | **3** | 最被低估的一条。Bambu 默认第 2 层就开始吹，底面还没定型就被吹冷收缩 |
-| 工艺 → 冷却 | 风扇速度 | PLA 100% / **PETG 30–50%** | PETG 吹太狠会脱层 |
-| 工艺 → 其他 | **Brim 类型 / 宽度 / 间隙** | 仅外轮廓 / 5 mm / 0.1 mm | lift 400–1200 或薄片（depth ≤ 4.5）时必开 |
-| 工艺 → 速度 | **初始层速度** | **20–25 mm/s** | 默认 50。慢一点有益，但**不是主因** |
-| 工艺 → 速度 | 初始层填充速度 | 25 mm/s | 同上 |
-| 工艺 → 速度 | 整体速度（大平面件） | 降 20–30% | 给层间留结合时间 |
-| 打印机 → 挤出机 | **Z hop 类型 / 高度** | 普通（或螺旋）/ **0.4 mm** | 行程中抬高喷嘴。翘边一旦发生，这一条决定是"刮一下"还是"整片掀掉" |
-| 材料 | 热床 | **PLA 55–60℃ / PETG 75–80℃** | 大平面件往上限取 |
-| 材料 | 喷嘴 | PLA 210–220 / PETG 240–250 | |
+| Process → Quality → Precision | **Elephant foot compensation** | 0.15 mm | Kills first-layer bulge; pairs with geometric chamfer |
+| Process → Quality | **Initial layer line width** | 0.5 mm (≈120%) | Wider first-layer line = pressed harder, grips better |
+| Process → Cooling | **No fan for the first N layers** | **3** | The most underrated setting. Bambu's default blows from layer 2; the bottom gets chilled and shrinks before it sets |
+| Process → Cooling | Fan speed | PLA 100% / **PETG 30–50%** | Over-blowing PETG delaminates it |
+| Process → Others | **Brim type / width / gap** | Outer brim only / 5 mm / 0.1 mm | Mandatory when lift is 400–1200 or the part is thin (depth ≤ 4.5) |
+| Process → Speed | **Initial layer speed** | **20–25 mm/s** | Default 50. Slower helps, but **is not the main factor** |
+| Process → Speed | Initial layer infill speed | 25 mm/s | Same as above |
+| Process → Speed | Overall speed (large flat parts) | Reduce 20–30% | Leaves time for layer bonding |
+| Printer → Extruder | **Z hop type / height** | Normal (or Spiral) / **0.4 mm** | Lifts the nozzle on travel. Once warping starts, this decides "a scrape" vs "the whole patch peeled off" |
+| Filament | Bed | **PLA 55–60℃ / PETG 75–80℃** | Take the upper bound for large flat parts |
+| Filament | Nozzle | PLA 210–220 / PETG 240–250 | |
 
-**X2D 特有：**
+**X2D specifics:**
 
-- **腔体**：打 PLA **开顶盖／前门**（防热蠕变），打 PETG **关门**（保温、减小温差）。
-  这两条方向相反，别搞混。
-- **辅助风扇**：关（前几层尤其）。
-- **双喷嘴**：测试件一律**单色单槽**。混色会在双喷嘴机器上触发
-  "同时打印高温和低温材料"直接拒绝切片，还会立擦料塔、每层 purge。
+- **Chamber**: printing PLA — **open the top lid / front door** (prevents heat creep); printing PETG — **closed** (holds heat, shrinks the temperature gradient).
+  The two directions are opposite; don't mix them up.
+- **Auxiliary fan**: off (especially the first layers).
+- **Dual nozzle**: test parts are always **single-color, single-slot**. Mixed colors on a dual-nozzle machine triggers the
+  "high-temperature and low-temperature materials simultaneously" refusal to slice, plus a wipe tower and per-layer purge.
 
-## 四、摆放与环境（免费，但常被忽略）
+## 4. Placement and environment (free, and usually ignored)
 
-- **件放打印板中央**。贴板边的位置温度最低、温差最大，翘边从那里开始。
-- **热床先闷几分钟**再开始打，让整块板温度均匀（尤其 256 大板）。
-- **关门窗、避开空调出风口**。一股气流就能让大平面件一边先冷。
-  大件（任一方向 > 150 mm）值得加个围挡，纸箱就够。
-- **打印板要干净**：温水 + 洗洁精洗，别只用酒精（酒精去油不去糖/胶）。
-- **打完别急着取**：等板冷到 30℃ 以下，热着撬会让刚打完的平件变形。
+- **Put the part at the center of the print plate**. Edge positions are coldest with the largest temperature gradient; warping starts there.
+- **Let the bed soak for a few minutes** before printing so the whole plate is at uniform temperature (especially the large 256 plate).
+- **Close doors and windows; keep away from AC vents**. One draft makes a large flat part cool on one side first.
+  Large parts (any dimension > 150 mm) deserve an enclosure; a cardboard box is enough.
+- **Keep the plate clean**: wash with warm water + dish soap; alcohol alone doesn't cut it (alcohol removes grease, not sugars/resins).
+- **Don't rush to remove the part after printing**: wait until the plate cools below 30℃; prying while hot warps the freshly printed flat part.
 
-## 五、材料：这一条影响的是"能不能用"，不只是"好不好打"
+## 5. Material: this affects "usable or not", not just "printable or not"
 
 | | PLA | PETG |
 |---|---|---|
-| 翘边 | 小 | **明显更重**（大平面尤其） |
-| 尺寸精度 | 好 | 略差 |
-| 韧性 | 脆 | **韧** |
-| 弹性应变极限 | ~2.5% | **~4%** |
-| 吸湿 | 慢 | 快（48–72 h），打前 65℃/4–6 h |
+| Warping | Low | **Markedly worse** (large flat parts especially) |
+| Dimensional accuracy | Good | Slightly worse |
+| Toughness | Brittle | **Tough** |
+| Elastic strain limit | ~2.5% | **~4%** |
+| Moisture uptake | Slow | Fast (48–72 h); dry 65℃/4–6 h before printing |
 
-**校验件必须和成品同材料。** 两个原因：收缩率决定孔径，弹性模量决定"压进去的手感"。
-用 PLA 的孔去校 PETG 的球头，测出来的是错的。
+**Coupons must use the same material as the final part.** Two reasons: shrinkage rate sets hole diameters; elastic modulus sets the "feel" of pressing a joint in.
+Validating a PETG ball pin in a PLA hole measures the wrong thing.
 
-对**免胶快拆的弹性夹头**，PETG 其实是更合适的材料——弹片要反复弯折，
-PLA 在 0.3 mm 过盈下更容易直接崩掉叶片。但代价就是要正面处理它的翘边，
-上面这些参数一条都不能省。
+For the **elastic chuck of a glue-free snap-fit**, PETG is actually the better material — the leaves flex repeatedly,
+and PLA at 0.3 mm interference tends to snap the leaves outright. The price is dealing with its warping head-on:
+not one of the settings above is optional.
 
-## 六、验收
+## 6. Acceptance
 
 ```bash
-python <skill>/scripts/warp.py out.3mf          # 几何 + 站姿门禁，redesign 就退非零
-python <skill>/scripts/audit_3mf.py out.3mf     # 每件水密 + 1 个连通实体
-python <skill>/scripts/weigh_3mf.py out.3mf     # 切片器口径的真实克重
+python <skill>/scripts/warp.py out.3mf          # geometry + stance gate; redesign exits non-zero
+python <skill>/scripts/audit_3mf.py out.3mf     # each part watertight + 1 connected solid
+python <skill>/scripts/weigh_3mf.py out.3mf     # true weight on the slicer's basis
 ```
 
-`warp.py` 的退出码可以直接当 CI 门禁：任何一件判成 `redesign` 就不放行。
-（`brim` 退 1、`redesign` 退 2、全 ok 退 0。）
+`warp.py`'s exit code works directly as a CI gate: any part judged `redesign` blocks delivery.
+(`brim` exits 1, `redesign` exits 2, all ok exits 0.)
 
-⚠️ **`--slice` 必须带预设，否则它会永久卡住。** 只给 `--slice` 的时候，CLI 停在
-`Initializing StaticPrintConfigs` 那一行：**不报错、不产 gcode、退出码 0、进程也不退出**，
-你只会白等到超时（我们在这儿烧掉了 15 分钟的两次 5 分钟等待）。
+⚠️ **`--slice` must have presets, or it hangs forever.** With only `--slice`, the CLI stalls on the
+`Initializing StaticPrintConfigs` line: **no error, no gcode, exit code 0, process won't exit**,
+and you just wait out the timeout (we burned two 5-minute waits here).
 
-**它看起来非常像"GUI 占着单实例锁"——第一版就是这么误判的，错的。** GUI 早关干净了
-（`lsof -c Bambu` 空、配置文件 mtime 停在关闭那一刻），一样卡。真凶是缺打印机预设。
-把 machine + process 和 filament 传进去，**同一条命令 ~2 秒出 `plate_1.gcode`**：
+**It looks exactly like "the GUI holds the single-instance lock" — the first diagnosis said so, wrongly.** The GUI was long gone
+(`lsof -c Bambu` empty, config mtime frozen at shutdown), and it still hung. The real culprit: missing printer presets.
+Pass machine + process and filament, and **the same command produces `plate_1.gcode` in ~2 s**:
 
 ```bash
 --load-settings "<machine>.json;<process>.json" --load-filaments "<filament>.json"
 ```
 
-`weigh_3mf.py` 现在从 app bundle 的 `profiles/BBL/` 自动解析
-X2D 0.4 nozzle / 0.20mm Standard @BBL X2D / PLA Basic 三个预设
-（`--printer` / `--process` / `--filament` 可覆盖）。另外一个附带教训：
-**沙箱可能禁掉 `ps`**（`operation not permitted`），只靠 `ps` 的探测会静默失效并返回
-"没开"——现在改用 `lsof`，而且它只是**提示**，不再拦人。
+`weigh_3mf.py` now auto-resolves the three presets
+X2D 0.4 nozzle / 0.20mm Standard @BBL X2D / PLA Basic from the app bundle's `profiles/BBL/`
+(`--printer` / `--process` / `--filament` can override). One side lesson:
+**sandboxes may block `ps`** (`operation not permitted`); a `ps`-only probe silently fails and reports
+"not running" — it now uses `lsof`, and it's a **hint only**, no longer a blocker.
 
-（`--info` / `--export-3mf` 不需要预设，照常工作。）
+(`--info` / `--export-3mf` need no presets and work as usual.)
 
-**一条会让上面三道门禁全部失真的事**：切片器 `--export-3mf` 的产物是**工程式** 3MF——
-几何不在 `3D/3dmodel.model` 里，而在 `3D/Objects/object_N.model`，主模型只有
-`<component p:path="..."/>` 引用，摆位靠 `<build><item transform="...">`（分件存的是**局部
-坐标**，z 可以是负的）。只读主模型的脚本会**一个对象都读不到**，然后打印 "all clear"——
-**它没验任何东西**。两个脚本现在都两种布局都读并应用 build transform；自己写校验时别踩。
-交付前把几何式文件烘焙成工程式（`scripts/bake_project.py`）是常规操作，所以这条一定会遇到，
-详见 `delivery.md`。
+**One thing that invalidates all three gates above**: the slicer's `--export-3mf` output is a **project-style** 3MF —
+geometry is not in `3D/3dmodel.model` but in `3D/Objects/object_N.model`, the main model holds only
+`<component p:path="..."/>` references, and placement rides `<build><item transform="...">` (parts are stored in **local
+coordinates**; z can be negative). A script reading only the main model **reads zero objects**, then prints "all clear" —
+**it validated nothing**. Both scripts now read both layouts and apply the build transform; don't step on this when writing your own checks.
+Baking geometry-style files into project-style (`scripts/bake_project.py`) is routine before delivery, so you will hit this.
+Details in `delivery.md`.

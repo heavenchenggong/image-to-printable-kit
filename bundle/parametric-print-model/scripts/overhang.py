@@ -1,59 +1,75 @@
 #!/usr/bin/env python3
-"""按打印朝向逐层查「中段悬空」——现有门禁漏掉的那一类。
+"""Layer-by-layer scan for MID-PART overhangs, by print orientation --
+the class of failure the existing gates miss.
 
-为什么需要这个脚本
-------------------
-`warp.py` 只看**首层接地**（翘边）；切片器只看 **floating regions**（整块脱离的岛）。
-两者都抓不到最常见的一类报废：**件中部一圈水平台阶**。
-它上下都连着料，所以切片器不报警；它不在首层，所以 warp.py 也不报警；
-但那一圈之下是空的，头几层就是往空气里挤丝 → 垂丝/拉丝/接不上 → 一掰就断。
+Why this script exists
+----------------------
+`warp.py` only looks at FIRST-LAYER grounding (warping); the slicer only looks
+at **floating regions** (whole detached islands).  Neither catches the most
+common way a print is scrapped: **a ring of horizontal step around the middle
+of a part**.  It is connected to material above and below, so the slicer does
+not complain; it is not in the first layer, so warp.py does not complain;
+but underneath that ring is air, so the first few layers extrude into open air
+-> drooping/stringing/no adhesion -> snaps off at a touch.
 
-实测案例（winston 免胶版 P2 `01 底座+下身罩`，2026-09-26 实物打废）：
-截面半径停在 13.995 mm（= 颈 Ø28）一直到 z=20.8，**z=21.0 一步跳到 18.030 mm**，
-单层凭空多出 **406 mm²** 的悬空环（615.3 → 1021.3 mm²）。切片器判「无警告」，
-实物在颈→裙交界处一团丝。
+Measured case (winston glue-free P2 plate object `01 底座+下身罩`
+(base + lower-body cover), scrapped as a physical print on 2026-09-26):
+the cross-section radius sits at 13.995 mm (= neck Ø28) all the way to z=20.8,
+then **one step at z=21.0 jumps to 18.030 mm** -- a single layer suddenly
+gains **406 mm²** of unsupported ring (615.3 -> 1021.3 mm²).  The slicer says
+"no warning"; the real print turned into a blob of spaghetti at the
+neck->skirt junction.
 
-算法
-----
-两种量，按网格能不能封闭自动选：
+Algorithm
+---------
+Two measurements; picked automatically by whether the mesh is sealed:
 
-1. **watertight → 真实截面轮廓**（主判据）
-   `mesh.section()` + `Polygon2D.polygons_full`，量两个数：
-   - `area` 本层新出现的悬空面积（mm²）
-   - `span` 新出现处离下层最近材料多远（mm）= **真实悬挑跨度**
-   必须同时看：只看 `area` 会被「大件薄薄一圈」骗，只看 `span` 会被
-   「小件一个尖角」骗。
+1. **watertight -> real section outline** (primary criterion)
+   `mesh.section()` + `Polygon2D.polygons_full`, measuring two numbers:
+   - `area` the overhang area newly appearing on this layer (mm²)
+   - `span` how far the new material is from the nearest material below (mm)
+     = **the real cantilever span**
+   Both are required: `area` alone is fooled by "a big part with a thin ring",
+   `span` alone by "a small part with one sharp corner".
 
-2. **不封闭 → 只用面积**（兜底）
-   截面面积 `A(z)` → 等效半径 `r = sqrt(A/π)`，逐层差 `dr = r(z) − r(z−h)`。
-   `dr > 层高` 就是比 45° 更陡的壁。面积与坐标系无关，所以这一路永远稳。
+2. **not sealed -> area only** (fallback)
+   Section area `A(z)` -> equivalent radius `r = sqrt(A/π)`, layer-to-layer
+   difference `dr = r(z) − r(z−h)`.  `dr > layer height` means a wall steeper
+   than 45°.  Area is coordinate-independent, so this path always works.
 
-⚠️ 三个踩过的坑，写在这里免得再走一遍
---------------------------------------
-1. **`Path3D.to_2D()` 不传 `to_2D` 时会按「本层自己的包围盒」重新定位平面**，
-   每层坐标系都不一样 → 层间 `difference()` 算出来全是假的。
-   必须显式传 `plane_transform(origin, normal)`。
-2. **凸包会把弯折件的两条肢桥起来**：手臂实测凸包报 101.8 mm² / 7.04 mm，
-   真实截面只有 0.015 mm/层（= 完全没问题）。弯折件用凸包**全是假阳性**。
-   —— 之前这版就是凸包版，误报过整盘。
-3. **3mf 对象命名有三套编号**：
-   - 自己刚出的盘（`splitter.write_colour_plates`）：trimesh 的 node 名 == 对象 id；
-   - 切片器回写过的盘：node 名被重编号（实测偏移 −1），但 `<object>` 上多了
-     `face_count`；
-   - `face_count` **不是 3mf 规范字段**，新盘上根本没有。
-   所以：先按 id 查名，再退回 `face_count`，最后退回 node 名。
+⚠️ Three traps already stepped in, recorded here so nobody walks them again
+--------------------------------------------------------------------------
+1. **`Path3D.to_2D()` re-locates the plane by "this layer's own bounding box"
+   when `to_2D` is not passed** -- every layer gets a different frame ->
+   layer-to-layer `difference()` results are all garbage.
+   Always pass `plane_transform(origin, normal)` explicitly.
+2. **A convex hull bridges the two limbs of a bent part**: measured on an arm,
+   the hull reported 101.8 mm² / 7.04 mm while the real section grows only
+   0.015 mm/layer (= perfectly fine).  On bent parts the hull is **all false
+   positives**.  -- An earlier version of this script used the hull and
+   false-flagged a whole plate.
+3. **3MF object naming has three numbering schemes**:
+   - a plate we just wrote (`splitter.write_colour_plates`): trimesh's node
+     name == object id;
+   - a plate rewritten by the slicer: node names are renumbered (observed
+     offset −1), but the `<object>` gains a `face_count` attribute;
+   - `face_count` is **not a 3MF spec field** and is absent on fresh plates.
+   So: look the name up by id first, fall back to `face_count`, then to the
+   node name.
 
-用法
-----
-    python overhang.py plate.3mf                  # 扫整盘
-    python overhang.py plate.3mf --json out.json  # 存 JSON，可当 CI 门禁
-    python overhang.py part.stl                   # 单件（无变换，按自身 z 轴）
+Usage
+-----
+    python overhang.py plate.3mf                  # scan a whole plate
+    python overhang.py plate.3mf --json out.json  # save JSON, usable as a CI gate
+    python overhang.py part.stl                   # single part (no transform, own z axis)
 
-退出码：0 = 全部放行；2 = 有件报警。
+Exit code: 0 = everything passed; 2 = at least one part flagged.
 
-边界说明：本脚本只判**几何**上的悬空。真正的支撑是切片器侧的
-`bake_project.py` 里 `SUPPORT` 按对象注入的（`enable_support=1` + `tree(auto)`）。
-本脚本负责告诉你**哪一件、哪一层**需要它，以及改完设计后验证那一圈是否真的消失。
+Scope note: this script judges only **geometric** overhang.  Actual support is
+injected per object on the slicer side by `SUPPORT` in `bake_project.py`
+(`enable_support=1` + `tree(auto)`).  This script tells you **which part,
+which layer** needs it, and verifies after a design change that the ring
+really went away.
 """
 
 import argparse
@@ -74,7 +90,8 @@ PLANE = plane_transform(origin=[0.0, 0.0, 0.0], normal=[0.0, 0.0, 1.0])
 
 
 def weld(mesh):
-    """合并重复顶点。STL 天生不共享顶点，不 weld 什么都测不准。"""
+    """Merge duplicate vertices.  STL never shares vertices; without welding
+    nothing measures repeatably."""
     m = mesh.copy()
     m.merge_vertices()
     m.update_faces(m.nondegenerate_faces())
@@ -84,10 +101,11 @@ def weld(mesh):
 
 
 def section(mesh, z):
-    """→ (截面面积 mm², 轮廓 shapely 几何或 None)。
+    """-> (section area mm², outline as shapely geometry or None).
 
-    面积对**任何**网格都成立（多闭环求和，与坐标系无关）；
-    轮廓只在 watertight 时才可信，所以不封闭时返回 None 走兜底判据。
+    The area holds for **any** mesh (summed over closed loops,
+    coordinate-independent); the outline is only trustworthy when watertight,
+    so on a non-sealed mesh None is returned and the fallback criterion kicks in.
     """
     s = mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
     if s is None:
@@ -105,7 +123,8 @@ def section(mesh, z):
 def scan(mesh, label, layer=0.2, tol=0.25, skip_bottom=1.5,
          area_warn=150.0, span_warn=3.0, area_min=30.0,
          dr_warn=0.35, darea_warn=25.0):
-    """tol = 下层外扩量；层高 0.2 时 tol=0.25 ≈ 放行与竖直方向夹角 ≤51° 的壁。"""
+    """tol = outward padding of the layer below; at 0.2 layer height,
+    tol=0.25 roughly admits walls up to 51° from vertical."""
     z0, z1 = float(mesh.bounds[0][2]), float(mesh.bounds[1][2])
     prev, prev_a = None, None
     rows, z = [], z0
@@ -133,11 +152,15 @@ def scan(mesh, label, layer=0.2, tol=0.25, skip_bottom=1.5,
             prev = cur if cur is not None else None   # lost outline -> a diff
         z += layer                                  # against it would be fake
 
-    # 判据只有一个，按网格能不能封闭二选一 —— 两个混用会互相污染：
-    #   watertight → span/area：真实几何，能定位「离下层多远」
-    #   不封闭     → dr/darea ：只吃面积，任何网格都成立
-    # 混用的代价是实测过的：`08 手掌` 的截面细长，横向错动就让 r_eff 涨 0.77，
-    # 而真实悬挑只有 0.25 mm —— dr 判据在细长截面上会误报。
+    # There is exactly one criterion, chosen by whether the mesh is sealed --
+    # mixing the two contaminates both:
+    #   watertight -> span/area: real geometry, can localise "how far above
+    #                the layer below"
+    #   not sealed -> dr/darea : consumes area only, holds for any mesh
+    # The cost of mixing them was measured: `08 手掌` (palm) has a slender
+    # cross-section, and lateral shift alone pushes r_eff up by 0.77 while the
+    # real cantilever is only 0.25 mm -- the dr criterion false-positives on
+    # slender sections.
     sealed = mesh.is_watertight
 
     def bad(r):
@@ -148,7 +171,8 @@ def scan(mesh, label, layer=0.2, tol=0.25, skip_bottom=1.5,
                 and (r["darea"] or 0.0) >= darea_warn)
 
     def severity(r):
-        """没报警时也要报出「最接近报警」的那一层，否则 ok 件看着像没测。"""
+        """Even without a flag, report the layer closest to flagging --
+        otherwise a passing part looks like it was never measured."""
         if sealed:
             return max(r["span"] / span_warn if span_warn else 0.0,
                        r["area"] / area_warn if area_warn else 0.0)
@@ -165,9 +189,10 @@ def scan(mesh, label, layer=0.2, tol=0.25, skip_bottom=1.5,
 
 
 def object_names(path):
-    """3mf 里『对象 id → 盘上显示名』。
+    """3mf: object id -> display name on the plate.
 
-    三套编号的坑见模块 docstring 第 3 条。这里返回两个字典，调用方按优先级取。
+    For the three-numbering-schemes trap see item 3 in the module docstring.
+    Returns two dicts; the caller applies them in priority order.
     """
     try:
         with zipfile.ZipFile(path) as z:
@@ -187,7 +212,8 @@ def object_names(path):
 
 
 def load_plate(path):
-    """→ [(名字, world 坐标下的 mesh)]。3mf 走 scene graph，stl 直接读。"""
+    """-> [(name, mesh in world coordinates)].  3mf goes through the scene
+    graph; stl is read directly."""
     obj = trimesh.load(path)
     if hasattr(obj, "graph") and hasattr(obj, "geometry"):
         by_id, by_faces = object_names(path)
@@ -195,8 +221,10 @@ def load_plate(path):
         for node in obj.graph.nodes_geometry:
             T, gname = obj.graph[node]
             raw = obj.geometry[gname]
-            # 先按**原始**面数取名再 weld —— weld 会删掉退化面，面数一变
-            # `face_count` 就对不上了（切片器回写过的盘只有这条路可走）。
+            # Name by the RAW face count before welding -- welding deletes
+            # degenerate faces, the count changes and `face_count` no longer
+            # matches (on slicer-rewritten plates this is the only path that
+            # works).
             lab = (by_id.get(str(node)) or by_faces.get(len(raw.faces))
                    or str(node))
             m = raw.copy()
@@ -212,19 +240,23 @@ def main():
     ap.add_argument("plates", nargs="+")
     ap.add_argument("--layer", type=float, default=0.2)
     ap.add_argument("--tol", type=float, default=0.25,
-                    help="下层外扩量，吸收斜坡（0.2 层高时 0.25 ≈ 放行 51° 以内的壁）")
+                    help="outward padding of the layer below, absorbs slopes "
+                         "(at 0.2 layer height, 0.25 ≈ admits walls up to 51°)")
     ap.add_argument("--skip-bottom", type=float, default=1.5,
-                    help="忽略距底面这么高的层（斜底归 warp.py 管）")
+                    help="ignore layers this close to the bed (sloped bottoms "
+                         "are warp.py's job)")
     ap.add_argument("--area-warn", type=float, default=150.0,
-                    help="单层新出现悬空面积报警线")
+                    help="alarm threshold for newly unsupported area per layer")
     ap.add_argument("--span-warn", type=float, default=3.0,
-                    help="悬挑跨度报警线（要与 --area-min 同时满足）")
+                    help="alarm threshold for cantilever span (must also meet "
+                         "--area-min)")
     ap.add_argument("--area-min", type=float, default=30.0,
-                    help="走 span 判据时的面积下限，挡掉针尖噪声")
+                    help="minimum area for the span criterion; filters needle-tip noise")
     ap.add_argument("--dr-warn", type=float, default=0.35,
-                    help="等效半径单层增长报警线（0.35 mm/0.2 mm ≈ 60°）")
+                    help="alarm threshold for per-layer equivalent-radius growth "
+                         "(0.35 mm / 0.2 mm ≈ 60°)")
     ap.add_argument("--darea-warn", type=float, default=25.0,
-                    help="dr 判据的面积增量下限")
+                    help="minimum area increment for the dr criterion")
     ap.add_argument("--json", default=None)
     a = ap.parse_args()
 
@@ -239,25 +271,27 @@ def main():
             report.append({"plate": plate, **s})
             w = s["worst"]
             if w is None:
-                print(f"   {label:16s} ok    中段无悬空（件高 {s['height']} mm）")
+                print(f"   {label:16s} ok    no mid-part overhang "
+                      f"(part height {s['height']} mm)")
                 continue
             tag = "!! WARN" if s["verdict"] == "warn" else "ok    "
             if s["method"] == "area-only":
-                detail = (f"Δr {w['dr']:+6.3f} mm/层  "
+                detail = (f"Δr {w['dr']:+6.3f} mm/layer  "
                           f"ΔA {w['darea']:+8.1f} mm²")
             else:
-                detail = (f"悬空 {w['area']:7.1f} mm²  "
-                          f"悬挑 {w['span']:5.2f} mm")
-            print(f"   {label:16s} {tag} [{s['method']:9s}] 最差层 离底 "
-                  f"{w['h']:5.1f} mm  {detail}")
+                detail = (f"unsupported {w['area']:7.1f} mm²  "
+                          f"span {w['span']:5.2f} mm")
+            print(f"   {label:16s} {tag} [{s['method']:9s}] worst layer at "
+                  f"{w['h']:5.1f} mm above the bed  {detail}")
             if s["verdict"] == "warn":
                 bad += 1
-                print("       → 这一件要对象级支撑，或把那一圈改成 45° 倒角")
+                print("       → this part needs per-object support, or turn "
+                      "that ring into a 45° chamfer")
     if a.json:
         with open(a.json, "w") as fh:
             json.dump(report, fh, ensure_ascii=False, indent=2)
         print(f"\nJSON → {a.json}")
-    print(f"\n合计报警 {bad} 件")
+    print(f"\ntotal flagged: {bad} part(s)")
     sys.exit(2 if bad else 0)
 
 

@@ -1,178 +1,178 @@
-# 分色拆件（split-to-print）— 什么时候做，怎么做
+# Color-split (split-to-print) — when to do it and how
 
-AMS 单件多色（`threemf.write_3mf` + 按对象分色）和分色拆件是**两条不同的路线**，
-不是同一个东西的两个名字。
+AMS single-piece multicolor (`threemf.write_3mf` + per-object color) and color-split are **two different routes**,
+not two names for the same thing.
 
-| | AMS 单件 | 分色拆件 |
+| | AMS single-piece | Color-split |
 |---|---|---|
-| 形态 | 一件打完，层内换色 | N 个独立件，每件单色，打后组装 |
-| 需要 AMS | 是 | **否** |
-| purge 废料 | 每层换色都冲洗，量级常与模型自重相当 | **0** |
-| 每件朝向 | 一个整体朝向，悬垂处靠支撑 | **各件独立最优朝向** |
-| 代价 | 洗料塔 + 多色串料 | 多出接合面耗材 + 一道装配工序 |
+| Form | One piece, in-layer color changes | N independent parts, each single-color, assembled after printing |
+| Needs AMS | Yes | **No** |
+| Purge waste | Every color change flushes; often comparable to the model's own weight | **0** |
+| Per-part orientation | One orientation for the whole; overhangs handled by supports | **Each part gets its own optimal orientation** |
+| Cost | Wipe tower + color bleed | Extra joint material + one assembly step |
 
-**判定线**：追求一次成型、不想装配 → AMS 单件；追求零废料 / 没 AMS / 打印时间与朝向可控 → 拆件。
+**Decision line**: want one-shot forming, no assembly → AMS single-piece; want zero waste / no AMS / controllable print time and orientation → color-split.
 
-> ⚠️ **交付形态：按颜色分盘，不是排一张床。** 拆件完成后的交付物是 N 个**单槽** 3MF
-> （`splitter.write_colour_plates()`），一盘一个颜色，每盘所有对象锁 1 号耗材槽。
-> 把几色排在一张床上 = 把上表那两栏收益（purge 0 / 不需要 AMS）又还回去：擦料塔回来了，
-> 每次换色又要 purge（小件的换色废料常比零件本身重），而且双喷嘴机器在两卷料温度档
-> 不同时会**拒绝切片**——「同时打印高温和低温材料可能导致喷嘴堵塞或打印机损坏」。
-> 混色单盘版可以留作出图、看排布的参考，交付说明里必须写「别拿去打」。
-> 只有一件的那种颜色用 `merge={丢: 留}` 并进别的盘，别为一片眼片单开一整盘。
+> ⚠️ **Delivery form: one plate per color, not one packed bed.** The color-split deliverable is N **single-slot** 3MFs
+> (`splitter.write_colour_plates()`), one color per plate, every object on each plate locked to filament slot 1.
+> Laying several colors on one bed = handing back both wins in the table above (purge 0 / no AMS needed): the wipe tower returns,
+> every color change purges again (small parts' changeover waste often outweighs the part itself), and dual-nozzle machines
+> **refuse to slice** when the two spools have different temperature classes — "printing high-temperature and low-temperature materials simultaneously may clog the nozzle or damage the printer".
+> The mixed-color single-plate version can be kept as a rendering / layout reference; the delivery notes must say "do not print this one".
+> Colors with only one part get folded into another plate with `merge={drop: keep}`; don't give a single eye piece its own plate.
 
 ---
 
-## 第一条：不能"按颜色拆"
+## Rule 1: You cannot "split by color"
 
-一个按颜色分的模型里，某个颜色的壳往往是**十几个互不相连的碎片**
-（犄角、耳鳍、瞳孔、肩球、手指、底座…）。按颜色拆出来的"件"是含大量悬空岛的废件，
-切片器会给每个岛单独加支撑，装配也无从下手。
+In a color-assigned model, one color's shell is often **a dozen-plus disconnected fragments**
+(horns, ear fins, pupils, shoulder balls, fingers, base…). "Parts" split by color are scrap full of overhang islands;
+the slicer adds supports per island and there's nowhere to start assembly.
 
-> **拆件的单位是「单个连通的可打印实体」，颜色只是它的属性。**
+> **A part is one connected printable solid (color is just an attribute).**
 
-先按几何（哪里能分开、哪里要拿来做接合面）分块，再把颜色分配给块；
-必要时允许某一小块改色以合并件数（把关节小球的颜色并进主件），并在文档里写明这是取舍。
+Chunk by geometry first (where can it separate, where should the joint faces be), then assign colors to chunks;
+allow recoloring a small chunk to merge parts when needed (fold the joint ball's color into the main part), and document the tradeoff.
 
-## 第二条：附录件不能穿进主体
+## Rule 2: Appendage parts must not penetrate the body
 
-所有贴在球面/曲面上生长的件（犄角、耳鳍、手臂），**根部必须取在主表面上**：
+Everything that grows on a sphere/curved surface (horns, ear fins, arms) — **the root must be taken on the main surface**:
 
-- 用主体曲面自身做一次差值，得到与主表面吻合的**凹背**（件"坐"在表面上）；
-- 销从主表面开口向内，末端留在件里；**不要**让件的实心部分埋进主体——那是装不进去的。
+- Difference against the body's own surface to get a **concave back** that matches the main surface (the part "sits" on the surface);
+- The pin goes inward from an opening on the main surface, its end staying inside the part; **do not** bury the part's solid body into the main body — it would never fit on.
 
 ```python
-outer = P.difference([P.union([base_collar, chain]), body_sphere])  # 凹背
-part  = P.union([outer, pin])                                       # 销在内侧
+outer = P.difference([P.union([base_collar, chain]), body_sphere])  # concave back
+part  = P.union([outer, pin])                                       # pin on the inside
 ```
 
-## 第三条：销孔不能比它穿过的那段肢体粗
+## Rule 3: A pin hole must not be fatter than the limb it passes through
 
-**最隐蔽的一条。** 给手掌做 Ø12.4 销、在前臂上开 Ø12.4 孔——前臂是 Ø12 胶囊，
-腕部还在收细（到 Ø6.5），布尔求差后手臂直接变成 2 个不连通体。
+**The sneakiest rule.** Making a Ø12.4 pin for a palm with a Ø12.4 hole in the forearm — the forearm is a Ø12 capsule,
+tapering toward the wrist (down to Ø6.5); after the boolean difference the arm becomes 2 disconnected bodies.
 
-> 打孔前先问：这段肢体在那个位置有多粗？胶囊的**球端是收细的**，
-> 按中段直径算会算错。
+> Before cutting the hole, ask: how thick is the limb at that spot? A capsule **tapers toward its spherical ends**;
+> computing with the mid-section diameter gets it wrong.
 
-孔太大或位置太靠近细端时，改用**平面胶接**（把连接面做成互相垂直的平面对齐），
-这是更省事的正解。
+When the hole is too large or sits too close to the thin end, switch to a **flat glued joint** (mating faces made as mutually perpendicular flat alignments) —
+the easier correct answer.
 
-## 第四条：销孔埋在实体内部 = 封闭空腔，不是孔
+## Rule 4: A pin hole buried inside a solid = sealed cavity, not a hole
 
-球面上的横向销孔，如果整根落在球体内部，布尔求差得到的是**封闭空腔**——
-销永远进不去，还会让主体件被 n_components 判成不连通（内部空腔算第二个壳）。
+A lateral pin hole on a spherical surface, if the whole run lies inside the sphere, yields a **sealed cavity** after the boolean difference —
+the pin can never enter, and the main part gets judged disconnected by n_components (an internal cavity counts as a second shell).
 
-修法：**先在主体上切一个装配平面**，孔从这个平面开口。
+Fix: **first cut an assembly plane on the body**, and let the hole open on that plane.
 
 ```python
 body = P.difference([body,
-                     slab(d_shoulder, 30.0, "above"),          # 切出 Ø22 平面
-                     cyl_d(5.2, 20.0, 30.5, d_shoulder, C)])   # 孔从平面开口
+                     slab(d_shoulder, 30.0, "above"),          # cut a Ø22 plane
+                     cyl_d(5.2, 20.0, 30.5, d_shoulder, C)])   # hole opens on the plane
 shoulder = P.intersection([P.sphere(8.4, C + d_shoulder * 33, subdivisions=4),
-                           slab(d_shoulder, 30.0, "above")])   # 球被切平当背
+                           slab(d_shoulder, 30.0, "above")])   # sphere cut flat as the back
 ```
 
-## 验收清单（每次拆件都跑）
+## Acceptance checklist (run for every color-split)
 
-1. **`n_components(m) == 1`** —— 按坐标焊接的连通性（索引法会误报）
+1. **`n_components(m) == 1`** — connectivity welded by coordinates (index-based checks misreport)
 2. **`m.is_watertight`**
-3. **`footprint(m)`** —— 接地面积 + 重心是否落在接地凸包内
-4. **件与件不互相穿模**（装配态渲染一遍，比对参考图）
-5. **最小特征 ≥ 2 × 层高**，缩放件要按最小特征反推比例（不是按整体高度）
-6. **用切片器内核收口**：`BambuStudio --info`，每个件的 `number_of_parts` 必须是 **1**。
-   ⚠️ 上面 1–2 两项**查不出"销的端面与宿主凸台精确共面"**这类问题——布尔会留下零体积碎片，
-   水密性和连通性都还判得过，只有 `number_of_parts` 会报（实测犄角报 5）。
-   凡是销插进项圈/凸台的件，销要多伸进宿主 **2–3 mm**。
-   ⚠️ 也别用 `trimesh.load()` 读 STL 再判水密——载入路径的自动修复会把好件判成散件。
-   用 `scripts/audit_3mf.py`（自己解析顶点索引）。
+3. **`footprint(m)`** — ground area + is COM inside the ground convex hull
+4. **Parts must not interpenetrate each other** (render the assembled state, compare against the reference)
+5. **Minimum feature ≥ 2 × layer height**; for scaled parts, derive scale from the minimum feature (not overall height)
+6. **Close with the slicer engine**: `BambuStudio --info`; each part's `number_of_parts` must be **1**.
+   ⚠️ Items 1–2 above **cannot catch things like "the pin's end face is exactly coplanar with the host boss"** — the boolean leaves zero-volume fragments,
+   watertightness and connectivity still pass; only `number_of_parts` flags it (measured: horn reported 5).
+   Wherever a pin inserts into a collar/boss, the pin must extend **2–3 mm further into the host**.
+   ⚠️ Also don't read STLs with `trimesh.load()` and judge watertightness — the load path's auto-repair grades good parts as scattered.
+   Use `scripts/audit_3mf.py` (parses vertex indices itself).
 
-## 接合件规格（FDM 经验值）
+## Joint specifications (FDM field values)
 
-| 形式 | 尺寸 |
+| Form | Dimensions |
 |---|---|
-| 一体销 | Ø8–10 × 8–12 深，**径向间隙 0.2 mm** |
-| 细件销 | Ø6（件太小就别用 Ø10） |
-| 定位销孔 | Ø3.2，插 3 mm 料段，深 6–9 |
-| 大平面对接 | 直接胶接 + 2 个 Ø3.2 定位销孔 |
-| 小件对接 | 纯平面胶接（Ø19.6 面足够） |
+| Integrated pin | Ø8–10 × 8–12 deep, **0.2 mm radial clearance** |
+| Small-part pin | Ø6 (don't use Ø10 on tiny parts) |
+| Alignment pin hole | Ø3.2, insert a 3 mm filament stub, 6–9 deep |
+| Large flat butt joint | Direct glue + 2 × Ø3.2 alignment pin holes |
+| Small-part butt joint | Pure flat glue (a Ø19.6 face is plenty) |
 
-## 打印朝向
+## Print orientation
 
-- 主体/裙罩：**切平面朝下**（穹顶朝上），天然免支撑
-- 贴在曲面上的件：`upright(m, 该件的装配法向)` —— 装配时它歪 60°，打印时让它立正
-- 长而弯曲的件（犄角）：`lay_flat` 躺平 + brim + 树形支撑，是唯一需要支撑的件
-- **镜像件复用朝向**：`mirror_twin(mesh_L, T_of_R)`，否则两侧躺平角不同，肉眼可见
-- 细长件（手指、犄角尖）：立着打强度差、躺平打易断——按装配受力方向选
+- Body/skirt: **cut plane down** (dome up), naturally support-free
+- Parts sitting on curved surfaces: `upright(m, that part's assembly normal)` — it leans 60° when assembled; let it stand straight when printed
+- Long curved parts (horns): `lay_flat` lying down + brim + tree supports — the only part that needs supports
+- **Mirrored parts reuse orientation**: `mirror_twin(mesh_L, T_of_R)`; otherwise the two sides lie at different angles, visible to the eye
+- Slender parts (fingers, horn tips): standing prints weak, lying down prints brittle — choose by the in-assembly load direction
 
-## 朝向的最终判决交给切片器（代理指标只用来排序）
+## The final orientation verdict belongs to the slicer (proxy metrics only rank candidates)
 
-`footprint()` 量的是"板上 0.8 mm 内的顶点做凸包"——**代理**。在凹底面上它**两个方向都会错**，
-同一套 Winston 套装实测：
+`footprint()` measures "the convex hull of vertices within 0.8 mm of the plate" — a **proxy**. On concave undersides it's **wrong in both directions**.
+Same Winston kit, measured:
 
-| 件 | 凸包口径 | 真实首层截面（z = 0.2 mm） | 错向 |
+| Part | Convex-hull basis | Real first-layer section (z = 0.2 mm) | Error |
 |---|---|---|---|
-| 犄角（弯管 + 法兰） | 153 mm² | **18.4 mm²** | 虚高 8 倍（球切出的凹面被填平） |
-| 耳鳍（锥壳 + 销） | 1 mm² | **4.35 mm²** | 虚低（凸包只咬到月牙两个尖） |
+| Horn (bent tube + flange) | 153 mm² | **18.4 mm²** | 8× too high (the concave face cut from a sphere gets filled in) |
+| Ear fin (cone shell + pin) | 1 mm² | **4.35 mm²** | Too low (the hull only bites the crescent's two tips) |
 
-虚高会把"刀尖上的姿态"判成"站得挺好"（`MIN_CONTACT = 5.0` 那道门形同虚设），虚低会误杀好姿态。
+Too high grades a "balance-on-a-knife-edge" pose as "standing fine" (the `MIN_CONTACT = 5.0` gate becomes a rubber stamp); too low kills good poses.
 
-### 终局判据 = 切片器自己的 `warning_message`
+### The final criterion = the slicer's own `warning_message`
 
 ```
 result.json → sliced_plates[0].warning_message
-  干净 = ""（空串，不是缺字段）
-  有问题 = "It seems object <名字> has floating regions. ..."
+  clean = "" (empty string, not a missing field)
+  problem = "It seems object <name> has floating regions. ..."
 ```
 
-一个 45 mm 的弯管切一次只要 **1.4 s**，所以可以**整球面采样 200–300 个候选姿态逐个判**，
-8 进程并行一分多钟出结果（`scripts/pose_brute.py`）。结果通常**双峰**：
+Slicing one 45 mm bent tube costs **1.4 s**, so you can **sample 200–300 candidate poses over the whole sphere and judge each one**;
+8-way parallel finishes in about a minute (`scripts/pose_brute.py`). Results are usually **bimodal**:
 
-- **姿态可救**（Winston 耳鳍：240 个里 **106 个放行**）→ 挑真实首层最大的，用
-  `orient="face"` 写进件定义
-- **姿态无解**（Winston 犄角：240 个里只有 **1 个**放行，还得竖成 45.6 mm 高，又慢又不稳）→
-  **别再换姿态，开对象级支撑**：往交付 3MF 的 `Metadata/model_settings.config` 里该件的
-  `<object>` 下加 `enable_support=1` / `support_type=tree(auto)` / `support_threshold_angle=30`。
-  ⚠️ **只写对象级**，别动 process 全局开关，否则整盘每一件都会被包进支撑。
+- **Pose salvageable** (Winston ear fin: **106 of 240 passed**) → pick the largest real first layer and write it
+  into the part definition with `orient="face"`
+- **Pose unsalvageable** (Winston horn: only **1 of 240** passed, and it stands 45.6 mm tall — slow and wobbly) →
+  **stop re-posing; turn on object-level supports**: under that part's `<object>` in the delivered 3MF's
+  `Metadata/model_settings.config`, add `enable_support=1` / `support_type=tree(auto)` / `support_threshold_angle=30`.
+  ⚠️ **Object-level only**; don't touch the process-wide switches, or every part on the plate gets wrapped in supports.
 
-### 五个坑
+### Five pitfalls
 
-1. **`--orient` 会让 `warning_message` 说谎。** 加 `--orient 1` 时，一个照样被报警的姿态会报成
-   空串；把那份几何原样导出复切，警告又回来了。**只在普通 `--slice 1` 下信这个字段。**
-   （顺带：`--orient 1` 也只做**纯 Z 轴偏航**，输出网格的 z 尺寸不变，别指望它摆平件。）
-2. **`grep "Floating vertical shell"` 不是判据。** `02 上身体` 有 160 层这个标注、
-   `01 底座` 的浮空体积 68.6 mm³，两件都通过——那只是薄壁 / 桥接的正常分类。
-   正确算法是**只看连续 ≥2 层**的浮空（单层浮空 = 桥接，允许）。
-3. **`orient="face"` 的 `dirvec` 是相对量。** 候选是在**导出的打印姿态 STL**（`parts_snap/*.stl`）
-   上判的，那个 STL 已经在 `lay_flat` 的坐标系里。所以 `face` 的实现是
-   `base, T = lay_flat(mesh)` 之后 `upright(base, -dirvec)`——**叠在求解器之上的增量**，
-   不是机架绝对方向。当成绝对方向喂进去会**转两次**（实测耳鳍落到 16.1 mm 高、照样报警，
-   正确值 10.7 mm）。
-4. **`result.json` 写在最后，而 CLI 必须被 `killpg` —— 这两件事会赛跑。**
-   轮询到 `baked.3mf` 一出现就 kill 进程组，result.json 可能还没落盘，**判决就整个丢了**。
-   丢判决比丢文件危险：`read_warning()` 返回 `None`，而 `not None` 是 `True`，
-   于是**一个从未被判决的切片会直接通过门禁、把交付文件覆盖掉**（实测踩到：三盘重切，
-   P1 那一轮结果里根本没有 result.json，却被记成 OK 并覆盖了交付件）。两处都得改：
-   ① 轮询的**终点设在 result.json**，不是 baked.3mf——几何落盘后再多等最多 `settle` 秒；
-   ② 判决是**三态**：`""` = 通过、`"..."` = 报警、`None` = **没判决，不算通过**，
-   判断必须写 `warning is not None`，不能写 `not warning`。
-   ⚠️ 别忘了"只报第一条"：修完被点名的那件，警告会跳到下一件。
-5. **切片器是 GUI 二进制，永不退出。** 轮询到 `baked.3mf` 出现就 `killpg`（用
-   `start_new_session=True` 起进程组）；CLI 的 cwd 是 `--outputdir`，所以喂进去的 STL
-   必须 `os.path.abspath()`，否则报 `input files to the slicer are not found`。
+1. **`--orient` makes `warning_message` lie.** With `--orient 1`, a pose that would still be flagged reports an
+   empty string; re-slice the same geometry exported as-is and the warning comes back. **Only trust this field under plain `--slice 1`.**
+   (By the way: `--orient 1` also only does a **pure Z yaw**; the output mesh's z size is unchanged — don't expect it to lay parts flat.)
+2. **`grep "Floating vertical shell"` is not a criterion.** `02 upper body` had 160 layers with this tag and
+   `01 base` had 68.6 mm³ of floating volume; both passed — those are just normal classifications of thin walls / bridges.
+   The correct algorithm counts only floating regions **connected over ≥2 layers** (single-layer floating = a bridge, allowed).
+3. **`orient="face"`'s `dirvec` is relative.** Candidates are judged on the **exported print-pose STL** (`parts_snap/*.stl`),
+   which is already in `lay_flat`'s coordinate frame. So `face` is implemented as
+   `base, T = lay_flat(mesh)` followed by `upright(base, -dirvec)` — **an increment stacked on the solver**,
+   not an absolute frame direction. Feeding it as absolute **rotates twice** (measured: ear fin landed at 16.1 mm tall and still flagged;
+   the correct value is 10.7 mm).
+4. **`result.json` is written last, and the CLI must be `killpg`-ed — the two race.**
+   Polling and killing the process group the instant `baked.3mf` appears can race result.json to disk, **losing the entire verdict**.
+   A lost verdict is more dangerous than a lost file: `read_warning()` returns `None`, and `not None` is `True`,
+   so **a never-judged slice passes the gate and overwrites the deliverable** (measured: three plates re-sliced;
+   P1's round had no result.json at all, yet was recorded OK and overwrote the delivery). Fix both:
+   ① poll **for result.json as the endpoint**, not baked.3mf — wait up to `settle` seconds extra after the geometry lands;
+   ② the verdict is **three-state**: `""` = pass, `"..."` = flagged, `None` = **no verdict, does not count as a pass**;
+   write the check as `warning is not None`, never `not warning`.
+   ⚠️ Don't forget "only the first offender is reported": fix the named part and the warning jumps to the next one.
+5. **The slicer is a GUI binary and never exits.** Poll for `baked.3mf` and `killpg` (start the process group with
+   `start_new_session=True`); the CLI's cwd is `--outputdir`, so STLs fed to it must go through `os.path.abspath()`,
+   or it reports `input files to the slicer are not found`.
 
-### 离线浮空量的正确算法（只用来排序）
+### The correct offline floating-volume algorithm (ranking only)
 
-`detect_floating_line(ThickPolyline, ExPolygons, gap, bool)` —— 逐层取**最外层轮廓**，
-减去下层材料膨胀 `gap`（0.7 mm），剩下的长度即浮空壁。两个陷阱：
+`detect_floating_line(ThickPolyline, ExPolygons, gap, bool)` — take the **outermost contour** per layer,
+subtract the lower layer's material dilated by `gap` (0.7 mm); the remaining length is the floating wall. Two traps:
 
-- `polygons_full` 会把**空腔**也返回成独立多边形，把所有多边形的 `.exterior` 都算上会让
-  内腔顶棚变成"外露悬空"——`01 底座` 因此虚报 113 mm。要再滤掉"被兄弟多边形 `covers`"
-  的那些，只留最外层。
-- trimesh 5.1 里 `Path3D` 已经没有 `polygons_full`（只在 `Path2D` 上）。用
-  `trimesh.intersections.mesh_multiplane` 拿线段，再用
+- `polygons_full` also returns **cavities** as independent polygons; summing every polygon's `.exterior` makes
+  an internal ceiling count as "exposed overhang" — `01 base` over-reported 113 mm this way. Filter out polygons
+  `covers`-ed by sibling polygons and keep only the outermost.
+- In trimesh 5.1, `Path3D` no longer has `polygons_full` (only `Path2D`). Use
+  `trimesh.intersections.mesh_multiplane` to get segments, then
   `Path2D(entities=[Line(points=[2k,2k+1])...], vertices=seg.reshape(-1,2))`
-  + `merge_vertices()` + `process()` → `.polygons_full`。
-  `paths_to_polygons()` 只吃**已闭合的环**，喂 2 点线段会因 `len(path) < 4` 被静默跳过。
+  + `merge_vertices()` + `process()` → `.polygons_full`.
+  `paths_to_polygons()` only takes **closed loops**; feeding 2-point segments gets silently skipped for `len(path) < 4`.
 
-**排序用它、判决不用它**：实测有一个候选离线浮空体积 **0.04 mm³**（比全套里任何通过件都干净），
-照旧被切片器报警。
+**Rank with it, never verdict with it**: one candidate measured **0.04 mm³** offline floating volume (cleaner than any passing part in the kit)
+and was still flagged by the slicer.

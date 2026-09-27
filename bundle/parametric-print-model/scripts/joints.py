@@ -305,9 +305,11 @@ def press_hole(seat, d, r, length, clearance=0.15):
     (bore 0.20 smaller than the pin on the diameter) on three joints; the user's
     report on the physical parts was:
 
-        手臂 -> 手掌   Ø4.60 pin into Ø4.40 bore   "完全插不上去" (cut it off to assemble)
-        瞳孔 -> 眼片   Ø4.00 pin into Ø3.80 bore   "差一点点"
-        耳鳍 -> 身体   Ø6.00 pin into Ø5.80 bore   (not reached yet; same defect)
+        arm -> palm        Ø4.60 pin into Ø4.40 bore   "won't go in at all"
+                           (had to cut it off to assemble)
+        pupil -> eye plate Ø4.00 pin into Ø3.80 bore   "so close -- just
+                           barely would not go in"
+        ear fin -> body    Ø6.00 pin into Ø5.80 bore   (not reached yet; same defect)
 
     Two independent reasons, both arithmetic and both visible before printing:
 

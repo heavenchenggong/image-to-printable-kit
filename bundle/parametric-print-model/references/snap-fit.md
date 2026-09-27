@@ -1,184 +1,186 @@
-# 免胶快拆接口（snap / press fit）
+# Glue-Free Snap-Fit Joints (snap / press fit)
 
-拆件之后，件与件之间怎么连，有三条路：**胶接 · 压合/卡扣 · 螺接**。这份写压合。
+After color-splitting, there are three ways to connect parts: **gluing · press/snap · screwing**. This document covers press/snap.
 
-## 先做这个判断：哪种接口
+## First decision: which joint
 
-| 宿主条件 | 用哪种 | 为什么 |
+| Host condition | Use | Why |
 |---|---|---|
-| 大块实体，能在里面挖 9 mm 深的腔 | **球关节（公头开槽弹性夹头）** | 一个关节同时给「固定 + 可调角度 + 可反复拆装」，且公头弹性、母头刚性，装配时不会把母头撑坏 |
-| 薄板 / 薄垫（3–8 mm） | **卡珠销（滑配身 + 公头卡珠）** | 做不出 9 mm 悬臂，弹性夹头在这里应变超标；**不要用负 clearance 的过盈压配**，见下一节 |
-| 实在太薄（<3 mm）、销长 <4 mm | 卡珠销，或者**干脆改设计** | 太短的销楔不住，只剩一点点摩擦 |
+| Bulky solid, room to carve a 9 mm cavity | **Ball joint (slotted elastic chuck on the male side)** | One joint delivers "fixing + angle adjustability + repeated assembly"; the male side is elastic, the female side rigid, so assembly never overstresses the socket |
+| Thin plate / thin pad (3–8 mm) | **Bead-catch pin (slide-fit body + bead catch on the male side)** | No room for a 9 mm cantilever; the elastic chuck overstrains here; **do not use a negative-clearance interference press fit** — see the next section |
+| Truly too thin (<3 mm), pin <4 mm long | Bead-catch pin, or **redesign outright** | Too short a pin can't wedge; all you get is a sliver of friction |
 
-反过来选（想清楚是谁让开）：
-- **公头让开**（球关节的弹性夹头）→ 母头是刚性的，装一百次也不变形。
-- **母头让开**（薄壁筒 + 内凸点）→ 只在母头真的是薄壁时才成立。母头周围全是实体，
-  让它"张开"= 让它永久屈服，第一次装进去，然后就松了。**这是最容易犯的错。**
+Picking in reverse (be clear about who yields):
+- **The male side yields** (the ball joint's elastic chuck) → the female side is rigid; assemble a hundred times without deforming it.
+- **The female side yields** (thin-wall tube + internal bumps) → only valid if the female side really is thin-walled. When the socket is surrounded by solid,
+  making it "spread open" = yielding it permanently: it fits the first time, then it's loose forever. **This is the easiest mistake to make.**
 
 ---
 
-## 球关节：四个数字决定成败
+## Ball joint: four numbers decide success or failure
 
 ```
-squeeze  δ = r_ball − r_mouth          球赤道过收口时的单边挤压量
-free len L = standoff                  锚点到赤道的自由弯曲长度
-leaf     t = r_ball − bore_r           叶片径向厚度
-strain   ε = 1.5 · δ · t / L²          PLA 屈服 ≈3.5%，设计取 <2%
+squeeze  δ = r_ball − r_mouth          single-side squeeze as the ball equator passes the collar
+free len L = standoff                  free bending length from the anchor to the equator
+leaf     t = r_ball − bore_r           leaf radial thickness
+strain   ε = 1.5 · δ · t / L²          PLA yield ≈3.5%, design target <2%
 ```
 
-`scripts/joints.py` 里的 `check(joint)` 直接算这套数并给 GO/FAIL。
+`check(joint)` in `scripts/joints.py` computes this set and returns GO/FAIL.
 
-| 数字 | 该是多少 | 反了会怎样 |
+| Number | Should be | If wrong |
 |---|---|---|
-| δ（单边过盈） | **0.15–0.35 mm** | Ø10.6 球头配 Ø9.0 收口 = δ0.8，ε 直接 68%——装一次就崩 |
-| L（standoff） | **≥8 mm**（Ø10 级） | standoff 5 mm 时 ε 会翻倍。腔深一点没关系，实体里到处是料 |
-| t（叶片厚） | 1.5–4 mm | 太厚 ε 超标；太薄（叶片变成 0.2 mm 薄片）则在颈部剪断 |
-| bore_r（减压孔） | **必须有**，Ø2–3.5 | 不然四片叶子在球顶交汇，只能互相挤压，弯不了 |
+| δ (single-side interference) | **0.15–0.35 mm** | Ø10.6 ball pin in a Ø9.0 collar = δ0.8, ε straight to 68% — snaps on the first assembly |
+| L (standoff) | **≥8 mm** (Ø10 class) | At standoff 5 mm, ε doubles. A deeper cavity costs nothing — the solid is full of material |
+| t (leaf thickness) | 1.5–4 mm | Too thick: ε over limit; too thin (leaves become a 0.2 mm sheet): shears off at the neck |
+| bore_r (relief hole) | **Mandatory**, Ø2–3.5 | Without it the four leaves converge at the ball top and can only press each other — they can't bend |
 
-**减压孔是必需的，不是可选优化。** 这是"开槽"能否生效的前提。
+**The relief hole is required, not an optional optimization.** It's the precondition for the slot to work at all.
 
-## 球关节：三条几何红线
+## Ball joint: three geometric red lines
 
-1. **收口要从座位一直开到腔心**。只开一半的话，球腔自身的侧壁会变成真正的收口，
-   真实过盈变成 `r_ball − 球腔侧壁半径`，**比设计的紧得多，而且看不出来**。
-2. **球赤道必须落在收口后面**（`standoff > 喉部深度`），否则没有扣合量，装上去直接掉。
-   喉部深度 = `standoff − sqrt(r_socket² − r_mouth²)`（收口圆柱与球腔的交接位置）。
-3. **母头孔口必须在表面上**。整根埋在实体内部 = 封闭空腔，销永远进不去。
-   同样地，孔的**起始面要比座位向外多切 1 mm**，否则布尔会留一层膜。
+1. **The collar must run from the seat all the way to the cavity center**. Cut only halfway and the ball cavity's own wall
+   becomes the real collar; the true interference becomes `r_ball − socket wall radius`, **far tighter than designed, and invisible**.
+2. **The ball equator must land behind the collar** (`standoff > throat depth`), or there's no catch and it falls right off.
+   Throat depth = `standoff − sqrt(r_socket² − r_mouth²)` (where the collar cylinder meets the ball cavity).
+3. **The socket mouth must open on the surface**. Fully buried inside a solid = sealed cavity; the pin can never enter.
+   Likewise, the hole's **start face must be cut 1 mm proud of the seat**, or the boolean leaves a membrane.
 
-## 压配柱：**不要用过盈**（这一节被实物推翻了）
+## Press pegs: **don't use interference** (this section was overturned by physical assembly)
 
-旧版这里写的是「单边过盈 0.10 mm」。**2026-09-27 实物装配把它否掉了**，三处接口全军覆没：
+The old version here said "0.10 mm single-side interference". **Physical assembly on 2026-09-27 killed it**; all three joints failed:
 
-| 接口 | 设计 | 实物反馈 |
+| Joint | Design | Physical feedback |
 |---|---|---|
-| 手臂 → 手掌 | 销 Ø4.60 / 孔 Ø4.40（单边过盈 0.10） | **完全插不上去**，用户把销剪掉才勉强装上 |
-| 瞳孔 → 眼片 | 销 Ø4.00 / 孔 Ø3.80 | 差一点点 |
-| 耳鳍 → 身体 | 销 Ø6.00 / 孔 Ø5.80 | 同一缺陷，还没插到 |
+| Arm → palm | Pin Ø4.60 / hole Ø4.40 (0.10 single-side interference) | **Would not go in at all**; the user cut the pin off to force it on |
+| Pupil → eye plate | Pin Ø4.00 / hole Ø3.80 | Barely short |
+| Ear fin → body | Pin Ø6.00 / hole Ø5.80 | Same defect, never even got started |
 
-**两条独立的算术错误**，打印前就能算出来：
+**Two independent arithmetic errors**, both computable before printing:
 
-1. **CAD 的过盈不是实物的过盈**。孔会打小（挤出压扁、开在床面上的孔还有大象脚），
-   销会打胖，所以 −0.10 的半径过盈落到实物上接近 **直径 0.45 mm**——对 Ø4.6 的销是
-   ~10%，还是**三根销同时起步**。实测量法：切片前从导出的 STL 逐层取截面，
-   销径与孔径差多少一目了然（本项目工具：按层截面取内环面积反算直径）。
-2. **销比孔长**。`press_peg` 造出的是 `length + 0.6`（尖端倒角）；`press_hole`
-   **旧版**造的是 `length + 1.8`，其中 1.0 在座位外面，**可用深度只有 `length + 0.8`**
-   ——比销只多 0.2 mm：
+1. **CAD interference is not physical interference**. Holes print small (extrusion squish, plus elephant foot on bed-surface holes)
+   and pins print fat, so a −0.10 radius interference lands on the part close to **0.45 mm of diameter** — ~10% on a Ø4.6 pin,
+   and that's **all three pins at once**. How to measure: before slicing, take layer sections from the exported STL;
+   the pin/hole diameter gap is plain to see (this project's tool: back out diameters from inner-ring areas of layer sections).
+2. **The pin is longer than the hole**. `press_peg` builds `length + 0.6` (tip chamfer); `press_hole`
+   **in the old version** built `length + 1.8`, of which 1.0 sits outside the seat, so the **usable depth was only `length + 0.8`**
+   — just 0.2 mm more than the pin:
 
-   | 接口 | 销总长 | 孔可用深（旧版） | 结果 |
+   | Joint | Pin total length | Hole usable depth (old version) | Result |
    |---|---|---|---|
-   | 手臂→手掌 | 5.00 + 0.60 = 5.60 | 5.30 | 顶死 0.30 mm |
-   | 瞳孔→眼片 | 4.50 + 0.60 = 5.10 | 5.00 | 顶死 0.10 mm |
+   | Arm→palm | 5.00 + 0.60 = 5.60 | 5.30 | Bottoms out 0.30 mm |
+   | Pupil→eye plate | 4.50 + 0.60 = 5.10 | 5.00 | Bottoms out 0.10 mm |
 
-   **顶死的接口，无论多松都合不拢。**
-   **2026-09-27 已修库**：`press_hole` 现在造 `length + 2.4`（1.0 在座位外），
-   可用深 `length + 1.4`，对 `press_peg` 留足 0.8 mm。**但配合保持力仍然为零**——
-   要"装得上还拔不掉"，用下面的卡珠销。
+   **A joint that bottoms out won't close no matter how loose it is.**
+   **Library fixed 2026-09-27**: `press_hole` now builds `length + 2.4` (1.0 outside the seat),
+   usable depth `length + 1.4`, leaving 0.8 mm of margin for `press_peg`. **But retention is still zero** —
+   for "goes in and won't pull out", use the bead-catch pin below.
 
-### 正确做法：滑配 + 公头弹性卡珠
+### The correct approach: slide fit + elastic bead catch on the male side
 
-- **销身滑配**：`r_bore = r_body + 0.10~0.15`（单边）。销身任何时候都不该"抓"。
-- **保持力来自卡珠**：珠半径 = 孔径 + 0.09~0.13（单边），只有珠那一段过盈。
-- **珠必须开在弹性公头上**：两刀交叉槽 + 轴向减压孔。实心珠压进刚性孔只会让**孔**屈服，
-  装一次就永久松开。
-- **叶片应变校核** `eps = 1.5 · δ · t / L²`（δ = 珠过盈，t = 叶片厚 = r_body − r_relief，
-  L ≈ 槽深 − 珠半径），**控制在 2 % 以内**；本项目实测 1.4–1.9 %。
-- **孔深 = 销长 + 锥长 + 0.8**，孔口 45°×0.8 倒角（开在床面上的孔尤其需要，那是大象脚
-  最重的地方）。
-- 需要轴向锁定就在珠的落点上开一道**环槽**（`bead_hole(groove=...)`），否则靠摩擦，
-  拉一下就开。
+- **Slide-fit pin body**: `r_bore = r_body + 0.10~0.15` (single side). The body should never "grab" at any point.
+- **Retention comes from the bead catch**: bead radius = hole radius + 0.09~0.13 (single side); only the bead section interferes.
+- **The bead must sit on an elastic male side**: two crossed slots + an axial relief hole. Pressing a solid bead into a rigid hole just
+  yields the **hole** — loose permanently after one assembly.
+- **Leaf strain check** `eps = 1.5 · δ · t / L²` (δ = bead interference, t = leaf thickness = r_body − r_relief,
+  L ≈ slot depth − bead radius), **kept under 2 %**; this project measured 1.4–1.9 %.
+- **Hole depth = pin length + chamfer length + 0.8**, with a 45°×0.8 mouth chamfer (bed-surface holes especially need it —
+  that's where elephant foot is heaviest).
+- If you need axial locking, cut a **groove ring** at the bead's landing point (`bead_hole(groove=...)`); otherwise friction alone,
+  and one tug releases it.
 
-工具已进 `joints.py`：`bead_peg()`（返回 `(add, cut)`，槽要**在并集之后**再减，否则切不到珠）
-与 `bead_hole()`。**注意 `P.difference()` 只吃一个列表**，形如
-`P.difference([union(...)] + cuts)`。
+Tools are in `joints.py`: `bead_peg()` (returns `(add, cut)`; the slots must be subtracted **after the union**,
+or they won't reach the bead) and `bead_hole()`. **Note `P.difference()` takes only one list**, i.e.
+`P.difference([union(...)] + cuts)`.
 
-### 一个接口一套数，别共用
+### One joint, one set of numbers; don't share
 
-珠径/孔径/槽深是**按销径缩放**的（本项：珠 Ø5.00 手腕 / Ø4.35 瞳孔 / Ø6.45 耳鳍），
-改一个接口不要顺手改另一个。**校验件与成品必须共用同一组数字**，否则校验件不再预测成品。
+Bead diameter / hole diameter / slot depth **scale with the pin diameter** (this project: bead Ø5.00 wrist / Ø4.35 pupil / Ø6.45 ear fin);
+changing one joint must not spill into another. **The coupon and the final part must share the same set of numbers**,
+or the coupon stops predicting the part.
 
-
----
-
-## 四条通用红线（和 split-to-print 共享）
-
-1. **销的根部必须埋进宿主件**。座位正好落在配合面上 = 两个实体共享一个面，
-   布尔并集会**静默丢掉**这条连接，件变成悬空岛。给销留 **2–2.5 mm 埋入段**。
-   （这是项目里最容易漏的一条：件看着是连的，连通性检查一跑就是 2 个岛。）
-2. **销孔不能比它穿过的那段肢体粗**。Ø12.4 的孔穿过 Ø12 且端部收细到 Ø6.5 的胶囊，
-   布尔求差直接把件切成两个不连通体。**开孔前先量那段最细处。**
-3. **附录件（犄角/耳鳍/手臂）不能穿进主体球体**，要"坐在"球面上 —— 先和球体做
-   `difference`，再并上销。
-4. **朝向规则：件只能带"打印时能朝上或朝侧面"的公头。** 朝下的销会顶到床上。
-   所以眼片/瞳孔正面朝下打（销朝上），手掌背面朝下打（孔朝下开在床面）。
 
 ---
 
-## 必须先打配合校验件
+## Four universal red lines (shared with split-to-print)
 
-依赖机器精度的数字有三个：**收口直径**（球关节）、**卡珠过盈**与**孔径**（压配柱）。
-挤出头、流量校准、材料收缩每台机器都不同，别人机器上"刚好"的过盈在你的机器上可能进不去或松。
+1. **The pin's root must be buried in the host part**. The seat landing exactly on the mating face = two solids sharing one face,
+   and the boolean union **silently drops** the connection; the part becomes a floating island. Give the pin a **2–2.5 mm buried section**.
+   (The easiest rule to miss in this project: the part looks connected, then the connectivity check finds 2 islands.)
+2. **A pin hole must not be fatter than the limb it passes through**. A Ø12.4 hole through a Ø12 capsule tapering to Ø6.5 at the end,
+   and the boolean difference cuts the part into two disconnected bodies. **Measure the thinnest spot first.**
+3. **Appendage parts (horns/ear fins/arms) must not penetrate the body sphere**; they must "sit on" the spherical surface — `difference`
+   against the sphere first, then union the pin.
+4. **Orientation rule: parts may only carry male features that can face up or sideways when printed.** A downward-facing pin hits the bed.
+   So eye plates/pupils print face down (pins up), palms print back down (holes opening on the bed surface).
 
-**做法**：出一个小件，上面排 **5 个收口**（设计值 ±0.2 两级，如 Ø9.6→Ø10.4），
-配 2 个球头。打完挨个试，选"要用力按、装好不晃"的那个，把 `r_mouth` 定到该值再出全套。
-成本半小时 8 g，换掉的是"打完 100 g 才发现装不上"。
+---
 
-**压配柱的校验件（v3，12–16 件散件）**：每个接口出 2–4 档（纯滑配 / 滑配+末端压环 /
-卡珠 / 卡珠+环槽），公母各一件**散着放**，用户拿着对插。两条与球头校验件不同的结论：
-- **不一定要长在同一块底板上**。球头校验件必须共用底板，是因为 Ø16×21 的立柱是窄高件；
-  压配校验件的公母都是**扁盘**（Ø14–16 × 6–9），实测接地 130–174 mm²、跨距 13–15 mm，
-  warp 全 `ok`，散着打反而省料、还能单件重打。
-- **公头不要开孔标记以外的东西**：档位用通孔（1 个孔 = 1 档），公母两侧都要标，
-  否则拆散之后配不上对。
+## Always print the fit coupon first
 
-**四个容易做砸的细节**（配合件第一版全中）：
+Three numbers depend on machine precision: the **collar diameter** (ball joint), and the **bead interference** and **hole diameter** (press joints).
+Extrusion, flow calibration, and material shrinkage differ per machine; an interference that's "just right" on someone else's machine
+won't go in — or falls out — on yours.
 
-1. **五个缩口要长在同一块底板上。** 各自一个圆盘 = 五个独立岛：要逐个加 brim、
-   VAT 打到一半容易被喷头带倒，切片器也会告诉你 `number_of_parts = 5`。
-   加一块 2.5 mm 底板，顺手把球腔下方的壁厚从 1.5 mm 补到 4 mm。
-2. **必须在件上标出档位。** Ø9.6 和 Ø10.4 差 0.4 mm，肉眼分辨不出来——
-   没标记的话这个校验件打完就废了。用**通孔**（1 个孔 = 第 1 档 … 5 个孔 = 第 5 档），
-   不要用凸点：凸点与底板同色，俯视和手里都读不出来。
-3. **过盈梯度要标出可用区间**，别让用户以为越小越牢。Ø10.6 球头配这五档的叶片应变：
+**Method**: produce one small part carrying **5 collars** (design value ±0.2 in two steps, e.g. Ø9.6→Ø10.4),
+with 2 ball pins. Test each after printing, pick "needs a firm press, no wobble when seated", set `r_mouth` to that value, then produce the full set.
+Cost: half an hour and 8 g; it replaces "discover at 100 g that nothing fits".
 
-   | 收口 | Ø9.6 | Ø9.8 | Ø10.0 | Ø10.2 | Ø10.4 |
+**Press-joint coupon (v3, 12–16 loose pieces)**: 2–4 grades per joint (pure slide fit / slide fit + end collar ring /
+bead catch / bead catch + groove ring), one male and one female each, **laid loose** for the user to pair and test. Two conclusions that differ from the ball-pin coupon:
+- **They don't have to share one base plate**. The ball-pin coupon must share a plate because the Ø16×21 columns are narrow-tall parts;
+  the press coupon's males and females are all **flat discs** (Ø14–16 × 6–9), measured ground 130–174 mm², span 13–15 mm,
+  all `ok` on warp. Loose printing saves material and lets you reprint a single piece.
+- **The male side carries nothing beyond the hole markers**: grades go as through-holes (1 hole = grade 1), marked on both male and female,
+  or pairs can't be matched after separating.
+
+**Four details that are easy to botch** (the first coupon version hit every one):
+
+1. **The five collars must grow on one base plate.** Separate discs = five independent islands: brim each individually,
+   the VAT can knock one over mid-print, and the slicer will tell you `number_of_parts = 5`.
+   Add one 2.5 mm plate, and while at it thicken the wall below each ball cavity from 1.5 mm to 4 mm.
+2. **Grades must be marked on the part**. Ø9.6 vs Ø10.4 differ by 0.4 mm — indistinguishable to the eye.
+   Without a marker the coupon is scrap once printed. Use **through-holes** (1 hole = grade 1 … 5 holes = grade 5),
+   never bumps: bumps are the same color as the plate and unreadable top-down or in hand.
+3. **The interference gradient must show the usable range**, or users assume tighter is better. Leaf strain of the Ø10.6 ball pin across the five grades:
+
+   | Collar | Ø9.6 | Ø9.8 | Ø10.0 | Ø10.2 | Ø10.4 |
    |---|---|---|---|---|---|
-   | 单边过盈 | 0.50 | 0.40 | 0.30 | 0.20 | 0.10 mm |
-   | 叶片应变 | 3.33 | 2.67 | 2.00 | 1.33 | 0.67 % |
-   | 判定 | 别用 | 偏紧 | 设计点 | 偏松 | 会晃 |
+   | Single-side interference | 0.50 | 0.40 | 0.30 | 0.20 | 0.10 mm |
+   | Leaf strain | 3.33 | 2.67 | 2.00 | 1.33 | 0.67 % |
+   | Verdict | Don't use | Tight | Design point | Loose | Wobbles |
 
-   **1 档看着最"牢"，但 3.33% 贴着 PLA 屈服点——插一次叶片就失去弹性，之后越用越松。**
-   可用区间是 2–4 档，从设计点开始试。
-4. **球头要当独立对象放在同一个文件里**（不要连在底板上），用户要拿着它去捅每一个孔。
+   **Grade 1 looks the "strongest", but 3.33% sits at PLA's yield point — one insertion kills the leaf spring, and it only gets looser with use.**
+   The usable range is grades 2–4; start from the design point.
+4. **The ball pin goes into the same file as an independent object** (not attached to the plate); the user needs to poke it into every hole.
 
-**验收**：切片器自己的内核确认底板是 **1 个连通体**（`BambuStudio --info` 看
-`number_of_parts`），并且实测孔径 = 标称值（切一层薄片、按环面积反算半径）。
+**Acceptance**: the slicer's own engine confirms the plate is **1 connected body** (`BambuStudio --info`, check
+`number_of_parts`), and the measured hole diameters match nominal (cut a thin slice, back out radii from ring areas).
 
-## 验证（不要只靠算术）
+## Verification (never arithmetic alone)
 
-**装配门禁（每个接口都跑）：`python -m scripts.mate_profile`。** 它把接口建成实体、
-沿轴逐层量四件事，全部从网格上取数、不抄参数：
+**Assembly gate (run for every joint): `python -m scripts.mate_profile`.** It builds the joint as solids and
+measures four things layer by layer along the axis, all taken off the mesh, no parameters copied:
 
-- **体间隙**（销身段，在销轴下 60% 内取最小）——必须 >0.02，否则装不进；
-- **珠握持**（全长的最大单边干涉）——必须 ≥0.05，否则拔一下就掉；
-- **轴向余量**（孔底 − 销尖，孔底也是量出来的）——必须 >0.3，**顶死的接口再松也合不拢，
-  而且这个错在 CAD 里看不出来**（winston 手臂那次就是这么死的）；
-- **叶片应变**——<2%，超了叶子定型失效。
+- **Body clearance** (pin body section, minimum within the lower 60% of the pin axis) — must be >0.02, or it won't go in;
+- **Bead grip** (max single-side interference over the full length) — must be ≥0.05, or one tug releases it;
+- **Axial margin** (hole bottom − pin tip, hole bottom also measured) — must be >0.3; **a joint that bottoms out won't close no matter how loose it is,
+  and this error is invisible in CAD** (exactly how the winston arm died);
+- **Leaf strain** — <2%; beyond that the leaves take a set and fail.
 
-四条全过才 PASS，退出码可当 CI 门禁。坑：布尔体带 T-junction，截面坐标必须
-`np.round(..., 4)` 环才闭合，否则 `polygonize` 返 0 个多边形、读数全 `nan`。
+All four pass = PASS; the exit code works as a CI gate. Pitfall: boolean solids carry T-junctions; section coordinates must be
+`np.round(..., 4)` before the loop closes, else `polygonize` returns 0 polygons and every reading is `nan`.
 
-`verify_snap.py` 那套应变/过盈核算只说明**叶片弯得动**，不说明实体真的合得上。
-另外要跑一次**插拔扫掠**：把公头沿自身轴逐步平移，每步算 `公头 ∩ 母头实体` 的体积。
+`verify_snap.py`'s strain/interference math only proves **the leaves can bend**; it doesn't prove the solids actually mate.
+Also run an **insert/pull sweep** once: translate the male side stepwise along its own axis, computing the volume of `male ∩ female solid` at each step.
 
-- 到位时（offset 0）必须是 **0** —— 不然装配态就在互相啃。
-- 拔出过程中必须**先升后降**回到 0 —— 峰值就是那次挤压，峰位应落在
-  `−sqrt(r_socket² − r_mouth²)` 附近（球赤道穿过收口的时刻）。
-- 如果峰值一路单调上升不回落，说明公头的**埋入段**在啃母头，不是关节在工作。
+- Fully seated (offset 0) must be **0** — otherwise the assembled state is already chewing on itself.
+- During pull-out the volume must **rise then fall** back to 0 — the peak is that squeeze, and the peak should land near
+  `−sqrt(r_socket² − r_mouth²)` (the moment the ball equator crosses the collar).
+- If the peak climbs monotonically and never falls, the male side's **buried section** is chewing the female side — the joint isn't working.
 
-## 装配顺序怎么定
+## How to set the assembly order
 
-**从承载最大的一端往装饰端装。** 例：底座 → 上身体 → （犄角/耳鳍/手臂）→ 手掌 →
-眼片 → 瞳孔。球关节装配后仍可转动，正好用来在最后一步调姿态，
-所以凡是"要摆角度的装饰件"都用球关节，凡是"必须固定的"都用压配。
+**Assemble from the most load-bearing end toward the decorative end.** Example: base → upper body → (horns/ear fins/arms) → palms →
+eye plates → pupils. Ball joints stay rotatable after assembly, which is exactly what lets you fine-tune poses as the last step —
+so decorative parts that need angles get ball joints, and anything that must be fixed gets a press fit.

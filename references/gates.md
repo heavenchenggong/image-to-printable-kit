@@ -1,93 +1,94 @@
-# 六道门禁：判据、命令、纪律
+# Six Gates: Criteria, Commands, Discipline
 
-每道门禁可脚本化、有退出码。全部 PASS 才允许交付。命令里的 python 均为
-`~/.workbuddy/binaries/python/envs/default/bin/python`。
+Every gate is scriptable and has an exit code. All gates must PASS before delivery.
+The `python` in every command is `~/.workbuddy/binaries/python/envs/default/bin/python`.
 
-## G1 切片器判决（唯一权威）
+## G1 Slicer Verdict (Sole Authority)
 
-`bake_project.py` 内置。核心是 `result.json → sliced_plates[0].warning_message`：
+Built into `bake_project.py`. The core is `result.json → sliced_plates[0].warning_message`:
 
-- `""`（空串）= 通过；`"..."` = 报警（内容即 GUI 橙色条原文，点名对象）；
-- **`None`（文件不存在/未落盘）= 没判决 = 失败**。三态必须严格区分——
-  轮询到 `baked.3mf` 就杀进程会赶不上判决落盘（它最后才写），`not None` 为真的话
-  一个从未判决的切片会被当成"通过"并覆盖交付文件。已交付文件必须**独立复切**
-  复核，不采信烘焙当场的读数。
-- 判决内容是**两条独立规则**：① 首层接触面积过小（点接触型）；
-  ② 连续 ≥2 层的浮空体积超阈值（中段悬空型）。单层浮空 = 桥接，不算。
-- **每盘只记第一条**告警：修完一件后警告跳到下一件是正常现象，不是"修了还报"。
-- `--orient` 会让 `warning_message` 说谎，判决只对纯 `--slice 1` 有效。
+- `""` (empty string) = pass; `"..."` = warning (the text is the original of the GUI's orange banner, naming objects);
+- **`None` (file missing / never written) = no verdict = failure**. The three states must be strictly distinguished —
+  killing the process as soon as `baked.3mf` appears misses the verdict (it is written last). If `not None` is treated as true,
+  a slice that was never judged counts as "pass" and overwrites the deliverable. Delivered files must be **re-sliced
+  independently** for verification; never trust the readout taken at bake time.
+- The verdict covers **two independent rules**: ① first-layer contact area too small (point-contact type);
+  ② floating volume over threshold for ≥2 consecutive layers (mid-body overhang type). A single floating layer = bridging, doesn't count.
+- **Only the first warning per plate is reported**: after fixing one part, the warning moving to the next part is normal, not "still failing after the fix".
+- `--orient` makes `warning_message` lie; the verdict is only valid for a plain `--slice 1`.
 
-## G2 朝向判决
+## G2 Orientation Verdict
 
-- 离线指标（首层接触、浮空体积、凸包 `footprint()`）**只用来排序，不当判决**：
-  凸包口径两个方向都会错（实测同一件虚高 8 倍 / 虚低 4 倍，虚高会放过刀尖姿态）。
-- 终局用 `pose_brute.py` 切片器黑箱：单件 45 mm 一次约 1.4 s，整球面 240 姿态
-  8 进程约 65 s。结果通常双峰：有解 → 换 `orient="face"` + `dirvec`；
-  无解 → 对象级树形支撑（`SUPPORT` 表，`enable_support=1 / support_type=tree(auto) /
-  support_threshold_angle=30`，process 全局 `enable_support` 保持 0）。
-- **`orient="face"` 的 `dirvec` 是相对量**：候选 STL 已在 `lay_flat` 坐标系里，
-  正确实现是 `base, T = lay_flat(mesh); upright(base, -dirvec)`。当成机架绝对
-  方向会转两次（实测落到 16.1 mm 高而不是 10.7，且照样报警）。
-- 参考工具输出时警惕"还没写完"：`result.json` 读取要带重试 + `judged` 标志。
+- Offline metrics (first-layer contact, floating volume, convex-hull `footprint()`) **rank candidates only, never judge**:
+  the convex-hull measure errs in both directions (measured: same part inflated 8× / deflated 4×; inflation can pass a blade-tip pose).
+- The final call is the `pose_brute.py` slicer black box: a single 45 mm part takes ~1.4 s per pose; the full sphere of 240 poses
+  across 8 processes takes ~65 s. The result is usually bimodal: solution exists → switch to `orient="face"` + `dirvec`;
+  no solution → object-level tree support (`SUPPORT` table, `enable_support=1 / support_type=tree(auto) /
+  support_threshold_angle=30`, keep the process-global `enable_support` at 0).
+- **For `orient="face"`, `dirvec` is a relative quantity**: the candidate STL is already in `lay_flat` coordinates;
+  the correct implementation is `base, T = lay_flat(mesh); upright(base, -dirvec)`. Treating it as a rack-frame absolute
+  direction rotates twice (measured: landed at 16.1 mm tall instead of 10.7, and still warned).
+- When reading reference tool output, beware "not finished writing yet": read `result.json` with retries + a `judged` flag.
 
-## G3 逐层悬空扫描（抓第④类报废）
+## G3 Layer-by-Layer Overhang Scan (Catches Class-④ Scrap)
 
-`overhang.py <盘或件> [--json out.json]`，逐层算截面突增：
+`overhang.py <plate or part> [--json out.json]`, computes per-layer cross-section jumps:
 
-- 抓的是**切片器不报警、首层门禁也不报**的报废：件中部的水平台阶——
-  截面半径一层内从 r1 跳到 r2，整圈悬空（Winston 实测单层 +406 mm²，打出来
-  是颈口一圈细丝乱团）。修复手段是 45° 肩台（锥台两端各埋 3 mm 进相邻实体），
-  顺带修掉共面布尔静默失效。
-- 默认阈值 `--area-warn 150 --span-warn 3.0 --darea-warn 25`；交付前用
-  2.5 倍严（60 / 2.0 / 15）再压一遍，确认没有踩线件。
-- `01 底座` 这类空腔件走 `area-only` 兜底路径时，`polygons_full` 会把空腔
-  返回成独立多边形——用 `q.covers(p.representative_point())` 滤掉被兄弟
-  多边形包住的，否则内腔顶棚被虚报成外露悬空。
+- It catches the scrap that **neither the slicer nor the first-layer gate reports**: a horizontal step at mid-part —
+  the cross-section radius jumps from r1 to r2 within one layer, an entire ring floating (measured on Winston: +406 mm² in
+  a single layer; printed, it comes out as a tangle of loose filaments around the neck opening). The fix is a 45° shoulder
+  (embed each end of the frustum 3 mm into the adjacent solid), which also fixes silent coplanar boolean failure.
+- Default thresholds `--area-warn 150 --span-warn 3.0 --darea-warn 25`; before delivery re-run at
+  2.5× stricter (60 / 2.0 / 15) to confirm no part sits on the line.
+- For hollow parts like `01 base` that take the `area-only` fallback path, `polygons_full` returns the cavity
+  as an independent polygon — filter out polygons contained by a sibling
+  polygon with `q.covers(p.representative_point())`, otherwise the inner-cavity ceiling gets falsely reported as exposed overhang.
 
-## G4 翘边
+## G4 Edge Lift
 
-`warp.py`：`contact`（接地凸包面积）/ `span`（底面最长跨度）/
-`depth`（件体积 ÷ 接地面积，**不能用包围盒或顶点 z 范围**——圆柱会被估成薄片）。
-判据 `lift = span²/depth`（平方律）：≤400 ok；400–1200 → brim + 前 3 层关风扇；
-**>1200 → 改模型别调参**；`depth ≤ 4.5` 薄片强制 brim。退出码可当 CI 门禁。
+`warp.py`: `contact` (grounded convex-hull area) / `span` (longest span of the bottom face) /
+`depth` (part volume ÷ grounded area, **never the bounding box or the vertex z range** — a cylinder gets estimated as a thin sheet).
+Criterion `lift = span²/depth` (square law): ≤400 ok; 400–1200 → brim + fan off for the first 3 layers;
+**>1200 → change the model, don't tune parameters**; `depth ≤ 4.5` thin sheets get forced brim. Exit codes work as a CI gate.
 
-## G5 连通性与克重
+## G5 Connectivity and Weight
 
-- 连通性：`audit_3mf.py` 自解析顶点索引建 `Trimesh(process=False)`（**别用
-  `trimesh.load()`**，自动修复会把好件判成散件）；以切片器 `--info` 的
-  `number_of_parts` 收口（每件应为 1；`<basematerials>` 不被 Bambu 读，
-  颜色靠 `Metadata/model_settings.config` 的 `extruder` 槽位）。
-- 克重：`weigh_3mf.py` 对比内嵌 `slice_info` 预测与 gcode footer；耗材密度
-  必须走 `inherits` 链解析（手填密度是 1.6% 谎报）。
-- 交付前对每个 3mf **独立复切**（G1）+ **独立 overhang 扫描**（G3），
-  两者都自己跑，不读流水线中间产物。
+- Connectivity: `audit_3mf.py` parses vertex indices itself and builds `Trimesh(process=False)` (**don't use
+  `trimesh.load()`**; its automatic repair can fail a good part as fragments); close the loop with the slicer's
+  `--info` `number_of_parts` (each part should be 1; `<basematerials>` is not read by Bambu,
+  color relies on the `extruder` slot in `Metadata/model_settings.config`).
+- Weight: `weigh_3mf.py` compares the embedded `slice_info` prediction against the gcode footer; filament density
+  must resolve through the `inherits` chain (a hand-filled density is a 1.6% lie).
+- Before delivery, **independently re-slice** every 3mf (G1) + run an **independent overhang scan** (G3);
+  run both yourself, never read intermediate pipeline artifacts.
 
-## G6 装配配合（卡珠 / 压配接口）
+## G6 Assembly Fit (Bead / Press-Fit Interfaces)
 
-`python -m scripts.mate_profile`（parametric-print-model skill）。沿轴逐层量四件事，
-全部从建成的实体上取数、不抄参数：
+`python -m scripts.mate_profile` (parametric-print-model skill). Measures four things along the axis, layer by layer,
+all taken from the built solids, never copied from parameters:
 
-- **体间隙** > 0.02/边 —— 销身必须滑得进；
-- **珠握持** ≥ 0.05/边 —— 只有卡珠那一段过盈，其余全长必须滑配；
-- **轴向余量** > 0.3 mm（孔底 − 销尖）—— **顶死的接口再松也合不拢，且 CAD 里看不出来**。
-  Winston 实物「手臂完全插不进手掌、被迫剪销」就是销 5.60 打进 5.30 的孔；
-- **叶片应变** < 2% —— 超了叶子定型失效，拔一次就永久松。
+- **Volume clearance** > 0.02/side — the peg body must slide in;
+- **Bead grip** ≥ 0.05/side — only the bead section interferes; the rest of the length must be a slide fit;
+- **Axial margin** > 0.3 mm (hole bottom − peg tip) — **an interface that bottoms out will never close no matter how loose, and CAD can't show it**.
+  The physical Winston failure "arm would not go into the palm at all, peg had to be cut" was a 5.60 peg forced into a 5.30 hole;
+- **Blade strain** < 2% — beyond that the leaf's spring set fails and it stays loose after the first removal.
 
-四条全过才 PASS，退出码可当门禁。两条实测坑：
+All four must pass, exit code usable as a gate. Two measured pitfalls:
 
-- 布尔体带 T-junction，截面坐标必须 `np.round(..., 4)` 后再并环，
-  否则 `polygonize` 返 0 个多边形、读数全是 `nan`——nan 不是"干净"，是没量到。
-- 量孔底要粗扫后细扫（0.25 mm 步长会把 0.45 mm 余量读成 0.28，好件被门禁误杀）。
+- Boolean solids carry T-junctions; cross-section coordinates must be `np.round(..., 4)` before merging rings,
+  otherwise `polygonize` returns 0 polygons and every readout is `nan` — nan is not "clean", it means nothing was measured.
+- Measuring the hole bottom needs a coarse scan then a fine scan (a 0.25 mm step reads a 0.45 mm margin as 0.28,
+  and the gate kills a good part).
 
-配套纪律：**依赖机器精度的数字（收口、珠过盈、孔径）必须先出配合校验件定档**
-——8 档 × 公母散件，档位用通孔数标记（同色凸点读不出来），公母两侧都标，
-校验件与成品**共用同一组常量**。参考 `references/snap-fit.md` 与 winston 的
-`fit_coupon_v3.py`。
+Companion discipline: **numbers that depend on machine precision (neck closure, bead interference, hole diameter) must be set via a fit coupon first**
+— 8 steps × male/female loose parts, steps marked by the count of through-holes (same-color bumps can't be read), marked on
+both male and female sides, and the coupon **shares the same constants** as the final parts. See `references/snap-fit.md` and
+winston's `fit_coupon_v3.py`.
 
-## 纪律（跨门禁）
+## Discipline (Cross-Gate)
 
-1. 失败的切片会伪装成干净通过——任何"没读到"都算失败。
-2. 不采信任何中间结果文件；复核一律重跑。
-3. 门禁改过的交付文件必须从备份恢复点可回滚（改前先备份六个交付件）。
-4. 重跑建模脚本会覆盖全部交付文件——每次只把改动的盘同步进交付目录，
-   其余从备份恢复。
+1. A failed slice masquerades as a clean pass — any "not read" counts as failure.
+2. Never trust intermediate result files; verification always re-runs.
+3. Deliverable files modified by a gate must be restorable from a backup point (back up the six deliverables before touching them).
+4. Re-running the modeling script overwrites every deliverable — sync only the changed plate into the delivery directory each time,
+   restore the rest from backup.

@@ -147,8 +147,9 @@ def write_presets(out_dir, printer=D_PRINTER, process=D_PROCESS, filament=None,
     """Flatten the three presets into `out_dir` and report what they resolve to.
 
     Returns a dict with `settings` / `filament` (the CLI arguments), the three
-    paths, and the effective `type` / `density` so callers can print the 口径.
-    `filament_type` / `density` default to what the chain says — pass them only
+    paths, and the effective `type` / `density` so callers can print the
+    resolved values.
+    `filament_type` / `density` default to what the chain says -- pass them only
     to override deliberately.
     """
     os.makedirs(out_dir, exist_ok=True)

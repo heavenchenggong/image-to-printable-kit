@@ -1,35 +1,35 @@
 # Image → Printable Kit
 
-端到端流水线 skill：**从一张图片到一套打开即打的 3MF 打印文件**——参数化建模、分色拆件（AMS 单件 / 胶接 / 免胶快拆三路）、逐件打印朝向、切片烘焙、六道质量门禁、交付文档与验证图。
+End-to-end pipeline skill: **from one image to a set of print-ready 3MF files** — parametric modeling, color-split parts (three routes: single AMS plate / glue / glue-free snap-fit), per-part print orientation, slice bake, six quality gates, delivery docs and verification images.
 
-> Claude Code / WorkBuddy skill。踩过一遍完整的坑才成型，不是拼出来的模板。
+> Claude Code / WorkBuddy skill. Shaped by one full pass through the pitfalls, not assembled from templates.
 
-## 为什么要做成 skill
+## Why This Is a Skill
 
-把一个吉祥物从图片做成能打印的东西，真正的难点不在建模，而在**报废方式超出直觉**：
+Turning a mascot from an image into something printable: the real difficulty is not modeling, it's that **the failure modes defy intuition**:
 
-- 切片器报「有浮空部件」——只是其中一类
-- 大平面翘边——`warp.py` 抓
-- 件中部**单层水平台阶**：截面一层内跳 +406 mm²，切片器不报警（上下都连料，不是岛）、不在首层翘边门禁的视野里，实物表现是台阶处一圈细丝乱团
-- **装不上**：三道打印门禁全 PASS 也挡不住装配失败。实物试装发现「手臂完全插不进手掌」——销比孔长、端面顶死，这在 CAD 里看不出来 → `mate_profile.py` 装配门禁（体间隙 / 珠握持 / 轴向余量 / 叶片应变）
+- Slicer warning "parts floating" — only one class of scrap
+- Large flat surface lifting at the edges — caught by `warp.py`
+- **A single-layer horizontal step at mid-part**: cross-section jumps +406 mm² within one layer, the slicer doesn't warn (material connected above and below, not an island), it's outside the first-layer edge-lift gate's view, and the physical result is a tangle of loose filaments around the step
+- **Won't assemble**: all three print gates PASS and assembly still fails. Physical trial assembly found "the arm would not go into the palm at all" — the peg was longer than the hole and the end faces bottomed out, invisible in CAD → `mate_profile.py` assembly gate (volume clearance / bead grip / axial margin / blade strain)
 
-第四类是本流水线最贵的一条教训，也只能靠逐层悬空扫描抓；第五类（装配）同样只能靠实物暴露。整套 skill 的组织方式就是围绕「报废方式 × 六道门禁」的覆盖矩阵。
+The fourth class is this pipeline's most expensive lesson and can only be caught by layer-by-layer overhang scanning; the fifth (assembly) is likewise only exposed by the physical print. The whole skill is organized around the coverage matrix of "failure mode × six gates".
 
-## 流水线
+## Pipeline
 
-| # | 阶段 | 出口判据 |
+| # | Stage | Exit criterion |
 |---|---|---|
-| 0 | 分路冻结（参数化 vs AI 图生 3D；AMS vs 胶接 vs 免胶） | 路线定并已告知 |
-| 1 | 图纸化：件清单 / 接口清单 / 颜色表 | 成文冻结 |
-| 2 | 参数化建模 + 多视图渲染核对 | 全件水密连通 |
-| 3 | 分色分盘 | 每件归属唯一盘 |
-| 4 | 逐件朝向（切片器黑箱判决 + 翘边门禁） | 每件有解或已上支撑 |
-| 5 | 切片烘焙 → 3MF（内嵌配置 + gcode + 缩略图） | 判决文件落盘 |
-| 6 | 六道门禁（含装配配合 `mate_profile.py`） | 全部 PASS |
-| 7 | 文档同步（克重/板占/时间实测回填） | 无残留旧数字 |
-| 8 | 交付 + 打印提示 | present_files |
+| 0 | Route freeze (parametric vs AI image-to-3D; AMS vs glue vs glue-free) | Route decided and communicated |
+| 1 | Blueprinting: parts list / interface list / color table | Written down and frozen |
+| 2 | Parametric modeling + multi-view render check | Every part watertight and connected |
+| 3 | Color split into plates | Every part on exactly one plate |
+| 4 | Per-part orientation (slicer black-box verdict + edge-lift gate) | Every part solved or supported |
+| 5 | Slice bake → 3MF (embedded config + gcode + thumbnails) | Verdict file on disk |
+| 6 | Six gates (including assembly fit `mate_profile.py`) | All PASS |
+| 7 | Doc sync (weight/footprint/time measured values backfilled) | No stale numbers left |
+| 8 | Delivery + print notes | present_files |
 
-## 安装
+## Install
 
 ### ClawHub
 
@@ -37,49 +37,49 @@
 clawhub install image-to-printable-kit
 ```
 
-### 手动
+### Manual
 
 ```bash
-# 主 skill（流水线编排）
+# Main skill (pipeline orchestration)
 git clone https://github.com/heavenchenggong/image-to-printable-kit ~/.claude/skills/image-to-printable-kit
 
-# 依赖 skill（建模 / 朝向 / 烘焙的全部脚本），本机没有就一起装
+# Dependent skill (all scripts for modeling / orientation / baking); install alongside if missing on this machine
 cp -R ~/.claude/skills/image-to-printable-kit/bundle/parametric-print-model ~/.claude/skills/
 ```
 
-主 skill 是**编排层**：它按路径 `~/.claude/skills/parametric-print-model/` 调用工具脚本；`bundle/` 里放的是同一份依赖的副本，避免装完跑不起来。两边内容一致时用你的那份即可。
+The main skill is the **orchestration layer**: it invokes the tool scripts by path `~/.claude/skills/parametric-print-model/`; `bundle/` holds a copy of the same dependency so the install never runs broken. When both copies match, either works.
 
-WorkBuddy 用户的 skills 目录通常是 `~/.claude/skills/` 的软链，装一次两边都能用。
+For WorkBuddy users the skills directory is usually a soft link to `~/.claude/skills/`; install once and both work.
 
-### 环境
+### Environment
 
 ```bash
 pip install numpy trimesh shapely scipy matplotlib pillow   # python ≥ 3.10
 ```
 
-切片器需要 Bambu Studio CLI（macOS 上指向 GUI 二进制：
-`/Applications/BambuStudio.app/Contents/MacOS/BambuStudio`）。
+The slicer needs Bambu Studio CLI (on macOS point at the GUI binary:
+`/Applications/BambuStudio.app/Contents/MacOS/BambuStudio`).
 
-## 目录
+## Layout
 
 ```
-SKILL.md                  # 八阶段 runbook + 依赖说明
-references/gates.md       # 六道门禁：判据、命令、纪律
-references/case-winston.md# 实战案例志： Winston 吉祥物套件踩过的坑
-bundle/parametric-print-model/   # 依赖 skill（脚本 + 深层文档）
+SKILL.md                  # Eight-stage runbook + dependency notes
+references/gates.md       # Six gates: criteria, commands, discipline
+references/case-winston.md# Case log: pitfalls hit by the Winston mascot kit
+bundle/parametric-print-model/   # Dependent skill (scripts + deep docs)
 ```
 
-## 实战：Winston 吉祥物套件
+## Field Test: Winston Mascot Kit
 
-X2D 双喷嘴 / PETG / 免胶快拆 10 件 / 三盘（P1 绿 · P2 深色 · P3 点缀），三盘全部实物打印成功。过程中的两次报废与修法都写在 `references/case-winston.md`：
+X2D dual nozzle / PETG / glue-free snap-fit, 10 parts / three plates (P1 green · P2 dark · P3 accents); all three plates printed successfully on real hardware. Both scrap events along the way and their fixes are documented in `references/case-winston.md`:
 
-- `05 犄角`（弯管中段悬空）：240 个候选姿态只有 1 个放行且要竖成 45.6 mm → 保留矮稳姿态 + **只给这一件**开对象级树形支撑
-- `01 底座+下身罩`（颈部水平台阶）：45° 肩台锥台，两端各埋 3 mm 进相邻实体，406 mm² → 11.4 mm²
-- 手臂 ↔ 手掌（装配失效）：负 clearance 过盈压配在实物上 ≈ 直径 0.45 mm 干涉，且销比孔长端面顶死 → 全部改成**滑配销身 + 公头弹性卡珠**，新增装配门禁
+- `05 horns` (curved tube, mid-body overhang): only 1 of 240 candidate poses passed and it stood 45.6 mm tall → kept the low stable pose + object-level tree support for **this one part only**
+- `01 base + lower-body shell` (horizontal step at the neck): 45° shoulder frustum, each end embedded 3 mm into the adjacent solid, 406 mm² → 11.4 mm²
+- Arm ↔ palm (assembly failure): negative-clearance interference press fit measured ≈ 0.45 mm of interference on the physical print, and the peg was longer than the hole so the end faces bottomed out → all joints rebuilt as **slide-fit peg body + male-side elastic bead catch**, new assembly gate added
 
-## 易拆支撑
+## Easy-Release Support
 
-树形支撑想徒手撕：B 嘴装 Bambu **Support for PLA/PETG** 断离式耗材，切片器里「支撑/筏接口」选它；树身仍用本体耗材（官方提示不要把支撑耗材用于 base）。交付的 3mf 里 `enable_support` 已写好，改接口耗材重切即可，不用重烘。
+To tear tree supports off by hand: load Bambu **Support for PLA/PETG** breakaway material in the B extruder and select it as "Support/raft interface" in the slicer; the tree trunk still uses base material (official guidance: never use support material for the base). In the delivered 3mf files `enable_support` is already written; change the interface material and re-slice, no re-bake needed.
 
 ## License
 

@@ -1,79 +1,78 @@
-# 案例志：Winston 吉祥物套件（2026-09）
+# Case Log: Winston Mascot Kit (2026-09)
 
-第一个完整跑通本流水线的案例。X2D 双喷嘴、PETG、免胶快拆三盘（P1 绿 / P2 深色 / P3 点缀）、10 件。以下是踩过的、不踩不知道的坑，按阶段归档。
+The first case to run this pipeline end to end. X2D dual nozzle, PETG, glue-free snap-fit across three plates (P1 green / P2 dark / P3 accents), 10 parts. Below are the pitfalls actually hit — the kind you only learn by hitting — archived by stage.
 
-## 建模 / 拆件
+## Modeling / Part Splitting
 
-- **销的座位落在配合面上 = 布尔并集静默丢连接**。两个实体共享一个面时
-  `union` 结果可能是两个"贴着"的实体；所有销/柱/凸台必须留 2–2.5 mm 埋入段。
-- 共面布尔（颈口与裙底同为 z=21）同样静默失效，与上条同源。
-- 拆件按"连通实体"不按颜色壳；某色的壳拆出来是十几个悬空岛。
+- **A peg's seat sitting exactly on the mating face = boolean union silently drops the connection**. When two solids share a face, the `union` result can be two solids merely "touching"; all pegs/posts/bosses must keep a 2–2.5 mm embedded section.
+- Coplanar booleans (neck opening and skirt bottom both at z=21) fail silently too — same root cause as above.
+- Split by "connected solid", not by color shell; one color's shell splits into a dozen floating islands.
 
-## 朝向
+## Orientation
 
-- 凸包接地面积两个方向都会错（153→真实 18.4 虚高 8 倍；1→真实 4.35 虚低 4 倍）。
-- 犄角（弯管）240 姿态只有 1 个放行且要竖成 45.6 mm → 不实用，保留矮稳姿态 +
-  对象级树形支撑；耳鳍（尖点）240 个里 106 个放行，但最优解（23.44 mm²）不在
-  球面 240 采样点上，是离线细搜找到的——黑箱搜索的采样密度不够时记得离线补搜。
-- `orient="face"` 第一版把 dirvec 当机架绝对方向 → 转两次、16.1 mm 高、照样报警。
+- Convex-hull grounded area errs in both directions (153 vs real 18.4, 8× inflated; 1 vs real 4.35, 4× deflated).
+- Horns (curved tube): only 1 of 240 poses passed, and it stood 45.6 mm tall → impractical; kept the low stable pose +
+  object-level tree support. Ear fins (sharp tip): 106 of 240 passed, but the best solution (23.44 mm²) was not on
+  the 240-point sphere sampling — it came from an offline fine search. When black-box sampling density is insufficient, remember to search offline too.
+- The first version of `orient="face"` treated dirvec as a rack-frame absolute direction → rotated twice, 16.1 mm tall, still warned.
 
-## 报废分类（四类，门禁覆盖矩阵）
+## Scrap Classification (Four Classes, Gate Coverage Matrix)
 
-| # | 报废方式 | 谁抓 |
+| # | Scrap mode | Caught by |
 |---|---|---|
-| ① | 首层点接触（耳鳍 1.33 mm²） | 切片器 G1 |
-| ② | 中段悬空连续 ≥2 层（手臂 9.4 mm³） | 切片器 G1 |
-| ③ | 大平面翘边 | warp.py G4 |
-| ④ | **件中部单层水平台阶（底座 +406 mm²）** | **只有 overhang.py G3**——切片器不报警（上下都连料不是岛）、不在首层、warp 不看 |
+| ① | First-layer point contact (ear fin 1.33 mm²) | Slicer G1 |
+| ② | Mid-body overhang for ≥2 consecutive layers (arm 9.4 mm³) | Slicer G1 |
+| ③ | Large flat-surface edge lift | warp.py G4 |
+| ④ | **Single-layer horizontal step at mid-part (base +406 mm²)** | **Only overhang.py G3** — slicer doesn't warn (material connected above and below, not an island), not the first layer, warp doesn't look |
 
-第④类是唯一"三道门禁都看不见"的报废，实物表现是台阶处一圈细丝乱团。
+Class ④ is the only scrap "invisible to all three gates"; on the physical print it shows up as a tangle of loose filaments around the step.
 
-## 切片器 / 门禁
+## Slicer / Gates
 
-- `result.json` 最后才写；轮询 `baked.3mf` 就杀进程 → 没判决 → `not None` 为真
-  → 失败切片伪装通过并覆盖交付件。修法：轮询终点 = `result.json`，判决三态。
-- 每盘只报第一条告警；`--orient` 会让告警说谎。
-- XML 拼接贴错位置 → 切片器丢全部对象名（变 Object_3…），文件还能切，极难察觉。
-- macOS 无 `timeout`；CLI 永不退出，轮询+killpg；喂 STL 必须 `abspath`。
+- `result.json` is written last; killing the process as soon as `baked.3mf` appears → no verdict → `not None` is true
+  → a failed slice masquerades as a pass and overwrites deliverables. Fix: poll for `result.json`, three-state verdict.
+- Only the first warning per plate is reported; `--orient` makes warnings lie.
+- XML fragment appended in the wrong place → the slicer drops every object name (becomes Object_3…), the file still slices, extremely hard to notice.
+- No `timeout` on macOS; the CLI never exits, poll + killpg; STLs must be passed as `abspath`.
 
-## 复核与交付
+## Verification and Delivery
 
-- 用户打印实物的失败照片是最高权重证据——细丝位置直接定位到 z=21 的台阶层，
-  反向坐实了第④类报废的存在。
-- 交付后所有文档数字（克重 31.9→32.5→32.6、合计 81.2→81.8→83.1）随每轮修复
-  变化，全文 grep 旧数字扫残留，别相信"只改了一处"。
-- 另一个 session 修的 P2 底座肩台经"独立复切 + 独立 overhang 扫描"确认成立；
-  复核者永远自己重跑，不读对方留下的结果文件。
-- P1 复扫用 2.5 倍严阈值压线检查，0 报警才放行（实测上身体最差 ΔA 30.6 mm²，
-  远低于事故层 406）。
+- The user's photos of failed physical prints are the highest-weight evidence — the filament tangle located the step layer at z=21 exactly,
+  retroactively confirming class-④ scrap exists.
+- After delivery, every doc number (weights 31.9→32.5→32.6, total 81.2→81.8→83.1) changed with each fix round;
+  grep the whole text for stale numbers, never believe "only one place changed".
+- The P2 base shoulder fixed by another session was confirmed via "independent re-slice + independent overhang scan";
+  the verifier always re-runs themselves, never reads the other party's result files.
+- P1 re-scan used 2.5× stricter thresholds as a line check; 0 warnings before release (measured worst ΔA on the body 30.6 mm²,
+  far below the incident layer's 406).
 
-## 易拆支撑（X2D 双喷嘴）
+## Easy-Release Support (X2D Dual Nozzle)
 
-- Bambu **Support for PLA/PETG** 断离式耗材：极性差异不与 PETG 粘连，徒手撕；
-  官方参数 top interface 0 / Z distance 0；RFID 自动配置。
-- 树形支撑：支撑耗材**只用于「支撑/筏接口」**，不要用于 base（官方提示，
-  省料且好拆）；树身仍用本体耗材。
-- 已交付 3mf 里 `enable_support` 已写好，用户在切片器里改接口耗材重切即可，
-  无需重烘。
+- Bambu **Support for PLA/PETG** breakaway material: polarity difference means it doesn't bond to PETG, tears off by hand;
+  official parameters top interface 0 / Z distance 0; RFID auto-configures.
+- Tree support: support material **only for the "Support/raft interface"**, not for the base (official guidance,
+  saves material and releases better); the tree trunk still uses base material.
+- In the delivered 3mf files `enable_support` is already written; the user changes the interface material in the slicer and re-slices,
+  no re-bake needed.
 
-## 装配回归：压配柱在实物上不成立（2026-09-27）
+## Assembly Regression: Press-Fit Peg Fails on the Physical Print (2026-09-27)
 
-- 用户实物反馈：**手臂完全插不进手掌（被迫剪销）**、瞳孔差一点点；耳鳍同缺陷未爆。
-  这是实物装配对设计规则的否决——三道打印门禁全 PASS 也挡不住装配失败，
-  因为门禁问的全是"能不能打"，没人问"能不能装"。
-- 根因两条，都会在打印前暴露：
-  1. CAD 的 −0.10 过盈在 FDM 实物上 ≈ 直径 0.45 mm（孔打小：挤出压扁 + 大象脚；
-     销打胖）；
-  2. **销比孔长**：`press_hole` 旧版可用深 `length+0.8` vs `press_peg` 的
-     `length+0.6`，端面顶死 0.30/0.10 mm。
-- 修法：三处统一改**滑配销身 + 公头弹性卡珠**（`joints.bead_peg`/`bead_hole`），
-  弹性仍在公头（交叉槽 + 减压孔），只是把"夹 Ø10.6 球"缩成"托一颗 +0.10 的珠"。
-  实测体间隙 +0.03~0.15/边、珠干涉 0.10~0.13/边、轴向余量 0.45~0.95 mm、
-  应变 1.36–1.70%。
-- **新增 G6 装配门禁 `mate_profile.py`**：径向（体间隙/珠握持）+ 轴向余量 + 应变，
-  四条全过才 PASS。轴向那一条是本次的真凶——顶死在 CAD 里看不出来。
-- 附带几何修正：手掌垫 7.5 → 8.5 mm（原厚度容不下 6.8 mm 孔深，孔会破出掌心）。
-- 文档教训：文件里手写的「Ø6.2 孔」与实际导出 Ø5.80 不符——**直径必须从网格量**，
-  `mate_profile`/逐层截面就是干这个的。
-- 校验件 v3：8 档 × 公母 = 16 件散件（不共用底板；公母两侧都用通孔标档位），
-  与成品**共用同一组常量**。实测手感理想档：手腕 3 / 瞳孔 6 / 耳鳍 7（待用户回读）。
+- Physical feedback from the user: **arm would not go into the palm at all (peg had to be cut)**, pupils just barely off; ear fin had the same defect but didn't fail.
+  This is a physical assembly veto of the design rule — all three print gates PASS and assembly still fails,
+  because the gates all ask "can it print"; nobody asked "can it assemble".
+- Two root causes, both detectable before printing:
+  1. CAD's −0.10 interference measures ≈ 0.45 mm of diameter on an FDM print (hole prints small: extrusion squish + elephant foot;
+     peg prints fat);
+  2. **Peg longer than the hole**: the old `press_hole` used usable depth `length+0.8` vs `press_peg`'s
+     `length+0.6`, end faces bottom out by 0.30/0.10 mm.
+- Fix: all three joints unified to **slide-fit peg body + male-side elastic bead catch** (`joints.bead_peg`/`bead_hole`),
+  elasticity still on the male side (cross slots + relief holes), just narrowed from "gripping an Ø10.6 ball" to "holding one +0.10 bead".
+  Measured: volume clearance +0.03~0.15/side, bead interference 0.10~0.13/side, axial margin 0.45~0.95 mm,
+  strain 1.36–1.70%.
+- **New G6 assembly gate `mate_profile.py`**: radial (volume clearance / bead grip) + axial margin + strain,
+  all four pass or FAIL. The axial rule was the true culprit this time — bottoming out is invisible in CAD.
+- Incidental geometry fix: palm pad 7.5 → 8.5 mm (the original thickness couldn't fit the 6.8 mm hole depth; the hole would break out through the palm).
+- Documentation lesson: the "Ø6.2 hole" written in the file did not match the exported Ø5.80 — **diameters must be measured from the mesh**;
+  `mate_profile`/layer-by-layer cross-sections exist to do exactly that.
+- Coupon v3: 8 steps × male/female = 16 loose parts (no shared base plate; both sides mark the step with through-holes),
+  **sharing the same constants** as the final parts. Best-feel steps from hand testing: wrist 3 / pupils 6 / ear fins 7 (awaiting user read-back).

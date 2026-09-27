@@ -1,103 +1,103 @@
 ---
 name: image-to-printable-kit
-description: 端到端流水线：从原始图片/参考图出发，经参数化建模、分色拆件（AMS 单件 / 胶接 / 免胶快拆三路）、逐件打印朝向、切片烘焙，产出一盘一个颜色、打开即切、带 gcode 和缩略图、通过六道质量门禁的 .3mf 打印文件套件，并同步交付 README / 件表 / 验证图。当用户说「从这张图做到能打印」「做成一整套可打印的」「图片→模型→分色→打印文件」「把 X 做成免胶快拆套件」等要求覆盖全流程时触发。单步需求（只建模、只拆件、只烘焙）直接用 parametric-print-model skill。
+description: End-to-end pipeline: from a raw image/reference picture through parametric modeling, color-split parts (three routes: single AMS plate / glue / glue-free snap-fit), per-part print orientation, slicing bake, producing a set of .3mf print files — one color per plate, ready to slice on open, with gcode and thumbnails, passing six quality gates — plus README / parts list / verification images. Trigger when the user asks to cover the full workflow: "turn this image into something printable", "make a complete printable set", "image → model → color split → print files", "make X into a glue-free snap-fit kit". Single-step requests (modeling only, splitting only, baking only) go straight to the parametric-print-model skill.
 metadata:
   type: skill
   scope: global
   agent_created: true
 ---
 
-# 图片 → 可打印套件：端到端流水线
+# Image → Printable Kit: End-to-End Pipeline
 
-## 定位与依赖
+## Positioning and Dependencies
 
-本 skill 是**编排层 runbook**：把「一张图」变成「一盘一个颜色、打开即打」的 3MF 套件。全部工具与深层细节在兄弟 skill **`parametric-print-model`**（路径 `~/.workbuddy/skills/parametric-print-model/`，与 `~/.claude/skills/` 是同一份软链）：
+This skill is an **orchestration-layer runbook**: it turns "one image" into a 3MF kit that is "one color per plate, ready to print on open". All tooling and deeper details live in the sibling skill **`parametric-print-model`** (path `~/.workbuddy/skills/parametric-print-model/`, the same copy soft-linked from `~/.claude/skills/`):
 
-| 工具/文档 | 用途 |
+| Tool/Doc | Purpose |
 |---|---|
-| `scripts/splitter.py` | trimesh 基元建模、布尔、`lay_flat`/`orient("face")`、球头关节 |
-| `scripts/joints.py` | 免胶快拆接头（弹性夹头公头、**卡珠销 = 滑配身 + 公头卡珠**、旧式压配柱只作兜底） |
-| `scripts/mate_profile.py` | **装配门禁**：体间隙 / 珠握持 / 轴向余量 / 叶片应变，逐层从实体上量 |
-| `scripts/pose_brute.py` | 逐件朝向：离线排序 + 切片器黑箱判决（240 姿态约 65 s） |
-| `scripts/bake_project.py` | 切片烘焙 → 3MF（内嵌配置 + gcode + 缩略图），brim / 对象级支撑、判决门禁 |
-| `scripts/overhang.py` | 逐层悬空扫描（抓切片器不报警的水平台阶） |
-| `scripts/warp.py` | 大平面翘边门禁（`lift = span²/depth` 平方律） |
-| `scripts/audit_3mf.py` / `weigh_3mf.py` | 连通性审计 / 克重复核 |
-| `references/snap-fit.md` | 免胶快拆设计规则、四条红线、配合校验件 |
-| `references/split-to-print.md` | 朝向判决、`warning_message` 判据、凸包陷阱 |
-| `references/warp.md` | 翘边判据与 redesign 线 |
-| `references/printability-checklist.md` / `delivery.md` | 打印性清单 / 交付口径 |
+| `scripts/splitter.py` | trimesh primitive modeling, booleans, `lay_flat`/`orient("face")`, ball-head joints |
+| `scripts/joints.py` | Glue-free snap-fit joints (elastic collet male peg, **bead peg = slide-fit body + male-side bead catch**, legacy press-fit peg kept as fallback only) |
+| `scripts/mate_profile.py` | **Assembly gate**: volume clearance / bead grip / axial margin / blade strain, measured layer by layer from the actual solids |
+| `scripts/pose_brute.py` | Per-part orientation: offline ranking + slicer black-box verdict (~65 s for 240 poses) |
+| `scripts/bake_project.py` | Slice bake → 3MF (embedded config + gcode + thumbnails), brim / object-level support, verdict gate |
+| `scripts/overhang.py` | Layer-by-layer overhang scan (catches horizontal steps the slicer never warns about) |
+| `scripts/warp.py` | Large-flat-surface edge-lift gate (`lift = span²/depth` square law) |
+| `scripts/audit_3mf.py` / `weigh_3mf.py` | Connectivity audit / weight re-check in grams |
+| `references/snap-fit.md` | Glue-free snap-fit design rules, four red lines, fit coupon |
+| `references/split-to-print.md` | Orientation verdicts, `warning_message` criteria, convex hull trap |
+| `references/warp.md` | Edge-lift criteria and redesign line |
+| `references/printability-checklist.md` / `delivery.md` | Printability checklist / delivery spec |
 
-环境：python 用 `~/.workbuddy/binaries/python/envs/default/bin/python`（numpy/trimesh/shapely/scipy/matplotlib/PIL 都在这里）。切片器 = Bambu Studio CLI（GUI 二进制，**永不退出**，macOS 无 `timeout`，轮询产物后 `killpg`）。
+Environment: use `~/.workbuddy/binaries/python/envs/default/bin/python` for python (numpy/trimesh/shapely/scipy/matplotlib/PIL all live there). Slicer = Bambu Studio CLI (the GUI binary, **never exits**, no `timeout` on macOS — poll for output then `killpg`).
 
-## 流水线总览（八阶段，每阶段有出口判据）
+## Pipeline Overview (Eight Stages, Each With an Exit Criterion)
 
-| # | 阶段 | 出口判据 | 失败时的动作 |
+| # | Stage | Exit criterion | Action on failure |
 |---|---|---|---|
-| 0 | 分路冻结 | 建模路线 + 拆件路线已定并告知用户 | — |
-| 1 | 图纸化 | 件清单 + 接口清单 + 颜色表成文 | 与用户对齐后冻结 |
-| 2 | 参数化建模 | 全件水密、布尔有效、多视图渲染核对通过 | 修几何，不修切片参数 |
-| 3 | 分色分盘 | 每件归属唯一盘；brim/支撑目标表写入烘焙脚本 | — |
-| 4 | 逐件朝向 | 每件过切片器黑箱判决或 warp 门禁 | 换姿态 / 开对象级支撑 / redesign |
-| 5 | 烘焙 | 每盘 `baked.3mf` 落盘且 `result.json` 判决落盘 | 修输入，不修门禁 |
-| 6 | 六道门禁 | 全部 PASS（详见 `references/gates.md`） | 逐门禁处置，禁止跳过 |
-| 7 | 文档同步 | README / 件表数字与实测一致 | 重扫全部 md 的旧数字 |
-| 8 | 交付 | present_files + 打印提示（支撑耗材、拆件手法） | — |
+| 0 | Route freeze | Modeling route + split route decided and communicated to the user | — |
+| 1 | Blueprinting | Parts list + interface list + color table written down | Align with the user, then freeze |
+| 2 | Parametric modeling | Every part watertight, booleans valid, multi-view render check passes | Fix geometry, not slicer settings |
+| 3 | Color split into plates | Every part assigned to exactly one plate; brim/support target tables written into the bake script | — |
+| 4 | Per-part orientation | Every part passes the slicer black-box verdict or the warp gate | Change pose / add object-level support / redesign |
+| 5 | Bake | Every plate has `baked.3mf` on disk and `result.json` verdict on disk | Fix inputs, not gates |
+| 6 | Six gates | All PASS (see `references/gates.md`) | Handle gate by gate; skipping is forbidden |
+| 7 | Doc sync | README / parts-list numbers match measured values | Re-grep all md files for stale numbers |
+| 8 | Delivery | present_files + print notes (support material, part-removal technique) | — |
 
-**节奏规则**：一次只推进一个阶段；每阶段产出物先自己核对，再给用户看。建模脚本是唯一几何真源（`snapkit_<name>.py`），所有交付文件从它重跑生成——改几何永远改脚本，不改 STL。
+**Pacing rule**: advance one stage at a time; self-check each stage's output before showing it to the user. The modeling script is the single source of geometric truth (`snapkit_<name>.py`); every deliverable is regenerated from it — to change geometry, always change the script, never the STL.
 
-## 阶段 0：分路冻结（不要默认，要判断）
+## Stage 0: Route Freeze (Decide, Don't Default)
 
-两个判断都在 `parametric-print-model/SKILL.md` 的决策表里，先做完再动手：
+Both decisions are in the decision tables of `parametric-print-model/SKILL.md`; complete them before doing anything:
 
-1. **参数化建模 vs AI 图生 3D**：球/胶囊/圆柱堆出来的造型走参数化；毛发/人脸/有机曲面才走 AI 图生 3D。用户说「想要能打印」时直接给结论并说明理由，别先问需求。
-2. **AMS 单件 / 胶接拆件 / 免胶快拆**：三条独立路线。用户说「分色拆件」= 胶接；说「免胶/卡扣/能拆装」= 快拆；没指定按「有没有 AMS」分路并告知三版存在。
+1. **Parametric modeling vs AI image-to-3D**: shapes buildable from spheres/capsules/cylinders go parametric; only fur/faces/organic surfaces go AI image-to-3D. When the user says "I want this printable", give the conclusion with the reasoning up front — don't interrogate requirements first.
+2. **Single AMS plate / glue-assembled split / glue-free snap-fit**: three independent routes. "Color-split parts" = glue; "no glue / snap / can be taken apart" = snap-fit; if unspecified, route by "AMS available or not" and mention the other two variants exist.
 
-分路结论写进项目 README 的头部，后续所有阶段引用它。
+Write the routing decision into the header of the project README; every later stage references it.
 
-## 阶段 1：图纸化（把图变成数）
+## Stage 1: Blueprinting (Turn the Image Into Numbers)
 
-从图片提取：三视图比例、件清单（每件一个连通实体）、颜色表、接口清单（谁插谁、压配还是球头）。产出一段成文的「件表」贴进建模脚本头部注释。规则：
+Extract from the image: three-view proportions, parts list (one connected printable solid per part), color table, interface list (what plugs into what, press fit or ball head). Produce a written "parts table" pasted into the header comment of the modeling script. Rules:
 
-- **拆件的单位是「单个连通的可打印实体」，颜色只是属性**。绝不能按颜色壳拆——某个颜色的壳常是十几个悬空碎片。
-- 互相插接的件同盘或考虑耗材换色成本；每盘一个颜色是默认布局。
-- 接口尺寸走 `snap-fit.md` 的表（球头规格、收口过盈 0.30 mm；小件用**卡珠销**：销身滑配 +0.10~0.15/边、珠 +0.10/边——**不要用负 clearance 的过盈压配**，实物上会变成直径约 0.45 mm 的干涉）；**所有销/柱留 2–2.5 mm 埋入段**（布尔并集对「座位落在配合面上」会静默丢连接）。
+- **The unit of splitting is "a single connected printable solid"; color is just an attribute**. Never split by color shell — a given color's shell is often a dozen floating fragments.
+- Interlocking parts share a plate or account for filament-change cost; one color per plate is the default layout.
+- Interface dimensions follow the tables in `snap-fit.md` (ball-head spec, neck closure interference 0.30 mm; small parts use the **bead peg**: peg body slide fit +0.10~0.15 per side, bead +0.10 per side — **do not use negative-clearance interference press fits**, they measure as ~0.45 mm of interference on the actual print); **all pegs/posts get a 2–2.5 mm embedded section** (boolean union silently drops the connection when "the seat sits exactly on the mating face").
 
-## 阶段 2：参数化建模
+## Stage 2: Parametric Modeling
 
-- 用 `splitter.py` 的基元（球/胶囊/圆柱/圆锥/圆环）+ `P.union/cut` 布尔组合；每件一个 `parts["NN_name"] = dict(name=中文名, colour=..., orient=..., mesh=...)`。
-- 布尔后逐件检查水密与连通（解析顶点索引自建 `Trimesh(process=False)` 判连通；**不要用 `trimesh.load()` 判断**，它会静默修复把好件判成散件，见 `audit_3mf.py`）。
-- 用 `preview.py` 渲染多视图预览，**给用户人工核对**再进入下一阶段。
-- 免胶路线：接头用 `joints.py`；公头开槽弹性夹头（弹性做在公头上，不是母头孔）；先打**配合校验件**定过盈再出全套——校验件档位用通孔标记，不用凸点。
+- Use the primitives of `splitter.py` (sphere/capsule/cylinder/cone/torus) + `P.union/cut` boolean composition; one `parts["NN_name"] = dict(name=<Chinese label>, colour=..., orient=..., mesh=...)` per part.
+- After booleans, check each part for watertightness and connectivity (parse vertex indices yourself and build `Trimesh(process=False)` to test connectivity; **do not use `trimesh.load()` to judge** — its silent repair can fail a good part as fragments, see `audit_3mf.py`).
+- Render multi-view previews with `preview.py` and **get manual user verification** before the next stage.
+- Glue-free route: joints come from `joints.py`; the male peg is a slotted elastic collet (elasticity lives on the male side, not in the female hole); print a **fit coupon** first to set the interference before producing the full set — coupon steps are marked with through-holes, not bumps.
 
-## 阶段 3：分色分盘
+## Stage 3: Color Split Into Plates
 
-- 盘 = 颜色；`bake_project.py` 的 `PLATES` 表定义每盘文件名、brim 目标件；`SUPPORT` 表定义对象级支撑目标件。
-- brim 只给首层接触 < ~30 mm² 的件显式写；支撑只给「黑箱搜索无姿态解」的件开对象级（process 全局开关保持 0）。
+- Plate = color; the `PLATES` table in `bake_project.py` defines each plate's filename and brim target parts; the `SUPPORT` table defines object-level support target parts.
+- Write explicit brim only for parts with first-layer contact < ~30 mm²; enable object-level support only for parts with "no pose solution found by black-box search" (keep the process-global switch at 0).
 
-## 阶段 4：逐件打印朝向
+## Stage 4: Per-Part Print Orientation
 
-- 默认 `lay_flat`；可疑件（弯管、尖点、大悬挑）跑 `pose_brute.py`——**离线指标只用来排序，判决一律以切片器 `warning_message` 为准**（黑箱判决通常双峰：有解 → 换 `orient="face"`；无解 → 对象级支撑）。
-- `orient="face"` 的 `dirvec` 是**叠在 lay_flat 之上的增量**，不是机架绝对方向——喂错会转两次（详见 `references/gates.md` §G2）。
-- 每件再过 `warp.py`：`lift = span²/depth`，>1200 → redesign 别调参。
-- **切片器不报警 ≠ 能打**：件中部单层水平台阶（截面积一步跳变）切片器和首层门禁都看不见，必须 `overhang.py` 抓（见 `references/gates.md` §G3，第④类报废）。
+- Default `lay_flat`; for suspicious parts (curved tubes, sharp tips, large overhangs) run `pose_brute.py` — **offline metrics are for ranking only; the verdict is always the slicer's `warning_message`** (the black-box verdict is usually bimodal: solution exists → switch to `orient="face"`; no solution → object-level support).
+- For `orient="face"`, `dirvec` is an **increment applied on top of lay_flat**, not a rack-frame absolute direction — feeding it wrong rotates twice (see `references/gates.md` §G2).
+- Run every part through `warp.py`: `lift = span²/depth`; >1200 → redesign, don't tune parameters.
+- **No slicer warning ≠ printable**: a horizontal single-layer step at mid-part (cross-section jumps in one step) is invisible to both the slicer and the first-layer gate; you must catch it with `overhang.py` (see `references/gates.md` §G3, class-④ scrap).
 
-## 阶段 5：烘焙
+## Stage 5: Bake
 
-`bake_project.py` 一次烘一盘：`--load-settings` 必带（否则挂死）、`--export-3mf` 只收名字、轮询 `baked.3mf` 后**继续等 `result.json` 判决落盘**再 `killpg`。对象级 brim/support 的 XML 拼接必须贴在整个 `<metadata key="name" .../>` 标签**之后**（贴错 → XML 不合法 → 切片器丢全部对象名）。其余坑见脚本 docstring（耗材 `inherits` 链、密度手填 1.6% 谎报、单实例锁假象等）。
+`bake_project.py` bakes one plate per run: always pass `--load-settings` (otherwise it hangs), `--export-3mf` takes only names, and after polling `baked.3mf` **keep waiting until the `result.json` verdict lands** before `killpg`. Object-level brim/support XML fragments must be appended **after** the entire `<metadata key="name" .../>` tag (wrong position → invalid XML → the slicer drops every object name). Other pitfalls are in the script docstring (filament `inherits` chain, hand-filled density lying by 1.6%, single-instance-lock illusion, etc.).
 
-## 阶段 6：六道门禁
+## Stage 6: Six Gates
 
-逐盘执行，判据与命令见 `references/gates.md`。G1 切片器判决（三态，`None` ≠ 通过）→ G2 朝向/黑箱 → G3 逐层悬空扫描 → G4 翘边 → G5 连通性与克重 → **G6 装配配合**（`mate_profile.py`：体间隙 / 珠握持 / 轴向余量 / 叶片应变——顶死的接口再松也合不拢，且 CAD 里看不出来）。门禁的纪律：
+Run per plate; criteria and commands in `references/gates.md`. G1 slicer verdict (three-state, `None` ≠ pass) → G2 orientation/black-box → G3 layer-by-layer overhang scan → G4 edge lift → G5 connectivity and weight → **G6 assembly fit** (`mate_profile.py`: volume clearance / bead grip / axial margin / blade strain — an interface that bottoms out will never close no matter how loose, and CAD can't show it). Gate discipline:
 
-- **独立复切 + 独立扫描**，不采信流水线中间留下的结果文件。
-- 门禁代码「没读到判决」必须算失败（三态处理），否则失败的切片伪装成干净通过并覆盖交付件。
-- 门禁是代码不是 eyeball；每道门禁可脚本化、有退出码。
+- **Independent re-slice + independent scan**; never trust result files left behind by the pipeline.
+- Gate code must treat "verdict not read" as failure (three-state handling), otherwise a failed slice masquerades as a clean pass and overwrites deliverables.
+- Gates are code, not eyeballs; every gate is scriptable with an exit code.
 
-## 阶段 7：文档同步
+## Stage 7: Doc Sync
 
-交付三件套：`README.md`（给人看的使用说明）、设计决策文档（件表、翻车记录）、验证图（门禁前后对比）。**所有实测数字（克重、板占、时间、支撑标注）以切片实测为准回填**；改完一件，全文 `grep` 旧数字扫残留。
+Deliver three artifacts: `README.md` (human-facing usage doc), a design-decision document (parts table, failure log), verification images (before/after gate comparisons). **All measured numbers (weight in grams, plate footprint, time, support annotations) get backfilled from actual slicing measurements**; after changing one part, `grep` the whole text for stale numbers.
 
-## 阶段 8：交付与打印提示
+## Stage 8: Delivery and Print Notes
 
-`present_files` 交付全部 3mf + 验证图。打印提示固定包含：拆支撑从根部剪；树形支撑想徒手撕 → B 嘴装 Bambu **Support for PLA/PETG** 断离式耗材、切片器里「支撑/筏接口」选它（树身仍用本体耗材，**不要把支撑耗材用于 base**）；免胶件装配按 `snap-fit.md` 的手法。
+Deliver all 3mf files + verification images via `present_files`. Print notes always include: cut supports flush at the root; to tear tree supports off by hand, load Bambu **Support for PLA/PETG** breakaway material in the B extruder and select it as "Support/raft interface" in the slicer (the tree trunk still uses base material, **never use support material for the base**); assemble glue-free parts per the technique in `snap-fit.md`.

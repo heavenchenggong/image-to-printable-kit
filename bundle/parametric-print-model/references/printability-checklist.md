@@ -1,83 +1,83 @@
-# 可打印性检查清单（FDM / 多色 AMS）
+# Printability Checklist (FDM / Multicolor AMS)
 
-## 几何
+## Geometry
 
-- [ ] 单一颜色壳内**全部布尔合并**成水密实体（`union`）。重叠的独立壳体看似没事，切片时会出现多余内壁与零厚度的斜面
-- [ ] 不同颜色壳之间可以重叠，但**不能出现薄膜套壳**（一个壳只有 0.5–1 mm 厚地包着另一个实体）。正确做法是在同一位置**对切**：`intersection(part, halfspace(z_lo=seam-0.3))` + `intersection(part, halfspace(z_hi=seam))`，接缝只重叠 0.2–0.4 mm
-- [ ] 分色接缝**尽量落在水平面**。按对象分色时换色只发生在整层边界 → purge 最小；斜接缝和逐层穿插会把换色次数抬到几十倍
-- [ ] 没有任何面低于热床（`vertices[:,2].min() >= 0`）
-- [ ] 最小特征 **≥ 2 mm**（手指/触角/尖端）。低于这个值 FDM 直接打不出来，别指望"打细点"
-- [ ] 悬垂 >45° 的部分数出来：手掌下沿、犄角背侧、外张手臂。数量少就开树形支撑，数量多就该改姿势
-- [ ] **沿打印轴跑一遍 `scripts/overhang.py`**，逐层看 `Δr`（等效半径单层增长）。**件中部一圈水平台阶是独立的一类报废，别跟上面那条混：**
-      - 它上下都连着料 → **切片器不报浮空区**
-      - 它不在首层 → **`warp.py` 不管**
-      - 但那一圈下面是空的，头几层往空气里挤丝 → 垂丝 / 拉丝 / 一掰就断
-      实测：Ø28 立柱顶上直接摆一个 Ø36 的球切口，`z=21.0` 单层 **Δr = +4.035 mm（= 406 mm² 悬空环）**，切片器判「无警告」，实物在交界处一团丝。→ **任何"缩颈 + 外张"的过渡都要做成 45° 肩台**，用 `ptools.frustum()`。
-      - 判据是 **Δr ≤ 层高**（0.2 mm 层高 → 45°）。报警线取 `0.35 mm/层`（≈60°）+ 面积增量 ≥ 25 mm²，两条同时满足才算。
-      - **锥台的两端都要埋进相邻实体**（各外延 3 mm），否则端面落在表面上 → 布尔并集里出现**共面重叠面**，结果静默不水密。
-      - 同一处方还顺手治一个更隐蔽的病：两个实体的面**恰好重合**（这里 `COLLAR_TOP == Z_SKIRT_LO == 21.0`）。共享一个面的并集是经典的静默失败，让肩台把它们包进去就一起消失了。
-- [ ] 无腿/悬浮造型必须给底座或做拆件，否则既站不住也无处落料
+- [ ] Within a single color shell, **everything boolean-`union`ed** into a watertight solid. Overlapping independent shells look fine but produce extra inner walls and zero-thickness ramps when sliced
+- [ ] Different color shells may overlap, but **no membrane-wrapping** (a shell only 0.5–1 mm thick enclosing another solid). The correct way is to cut **at the same seam**: `intersection(part, halfspace(z_lo=seam-0.3))` + `intersection(part, halfspace(z_hi=seam))`, with the seam overlapping only 0.2–0.4 mm
+- [ ] Color-change seams should **land on horizontal planes**. With per-object color, changes happen only at whole-layer boundaries → minimal purge; slanted seams and per-layer interleaving raise the change count by orders of magnitude
+- [ ] No face below the bed (`vertices[:,2].min() >= 0`)
+- [ ] Minimum feature **≥ 2 mm** (fingers/antennae/tips). Below that FDM simply can't print it; don't count on "printing it finer"
+- [ ] Count the parts overhanging >45°: palm underside, horn backs, splayed arms. Few → tree supports; many → change the pose
+- [ ] **Run `scripts/overhang.py` along the print axis**, and read `Δr` (equivalent-radius single-layer growth) per layer. **A horizontal step around the part's midsection is its own failure class — don't conflate it with the item above:**
+      - It connects to material above and below → **the slicer reports no floating regions**
+      - It's not the first layer → **`warp.py` doesn't cover it**
+      - But below that ring is air, and the first few layers extrude into the void → drooping / stringing / snaps at a bend
+      Measured: a Ø36 sphere section placed directly on top of a Ø28 column, `z=21.0`, single layer **Δr = +4.035 mm (= a 406 mm² overhang ring)**, the slicer said "no warnings", the physical part had a blob of spaghetti at the junction. → **Every "neck-down + flare-out" transition must become a 45° shoulder**, built with `ptools.frustum()`.
+      - The criterion is **Δr ≤ layer height** (0.2 mm layer → 45°). The alarm threshold is `0.35 mm/layer` (≈60°) + area gain ≥ 25 mm²; both must hold.
+      - **Both ends of the frustum must be buried into the adjacent solids** (extend 3 mm each), or the end faces land on surfaces → **coplanar overlapping faces** in the boolean union, silently non-watertight.
+      - The same prescription also cures a sneakier disease: two solids' faces **exactly coincident** (here `COLLAR_TOP == Z_SKIRT_LO == 21.0`). A union of two solids sharing one face is a classic silent failure; wrapping them into the shoulder makes it vanish.
+- [ ] Legless / floating designs must get a base or be color-split, or they can neither stand nor be printed
 
-## 分色
+## Color
 
-- [ ] 颜色按**壳**分，不是按部件分文件。一个颜色 = 一个对象 = 一个 AMS 槽位
-- [ ] 色值从参考图**抽样**取得（PIL `quantize(colors=8, method=MEDIANCUT)`），不要目测 hex
-- [ ] 颜色数 ≤ 4（AMS 槽位常见配置）。接近的深色（近黑墨蓝 / 纯黑）能合并就合并，省一个槽位也省一次换色
-- [ ] 交付时给出每个色值的 HEX，用户可按 HEX 反查 Polymaker 等品牌耗材
+- [ ] Colors split by **shell**, not by parts into files. One color = one object = one AMS slot
+- [ ] Color values **sampled** from the reference image (PIL `quantize(colors=8, method=MEDIANCUT)`), never eyeballed hex
+- [ ] Color count ≤ 4 (typical AMS slot config). Merge close dark colors (near-black ink blue / pure black) when possible — saves a slot and a color change
+- [ ] Deliver the HEX for every color so the user can look up filaments by HEX (Polymaker etc.)
 
-## 切片刻参数建议（FDM + AMS）
+## Slicer setting suggestions (FDM + AMS)
 
-| 项 | 值 | 理由 |
+| Item | Value | Reason |
 |---|---|---|
-| 层高 | 0.12 mm | 曲面接缝和分色边界在 0.12 最干净；0.20 会有明显台阶 |
-| 墙 / 顶底 | 3 / 5 | 摆件不承力 |
-| 填充 | 12–15% Gyroid | 实心体积 × 0.28 ≈ 实际克重 |
-| 支撑 | 树形自动，阈值 30° | |
-| 支撑材料 | 双喷嘴机型：Support for PLA 挂辅助喷嘴 | 主喷嘴打模型，拆支撑零后处理 |
-| 附着 | Brim 8 mm | 高瘦件防倒 |
-| 验证 | 先打 40% 缩放件 | 十几分钟验配色与接缝位置 |
+| Layer height | 0.12 mm | Curved seams and color boundaries are cleanest at 0.12; 0.20 shows visible steps |
+| Walls / top-bottom | 3 / 5 | Decor doesn't bear loads |
+| Infill | 12–15% Gyroid | Solid volume × 0.28 ≈ actual weight |
+| Supports | Tree auto, threshold 30° | |
+| Support material | Dual-nozzle machines: Support for PLA on the aux nozzle | Main nozzle prints the model; support removal is zero post-processing |
+| Adhesion | Brim 8 mm | Keeps tall thin parts upright |
+| Verification | Print a 40% scale sample first | A dozen minutes to validate color and seam positions |
 
-**缩放下限**：算清最小特征 × 缩放比。手指 2.2 mm 的件缩到 50% 就是 1.1 mm —— 直接报废。交付说明里必须写这条。
+**Minimum scale**: compute minimum feature × scale ratio. A part with 2.2 mm fingers at 50% has 1.1 mm fingers — straight to scrap. This must go in the delivery notes.
 
-## 渲染与导出陷阱（真踩过的）
+## Rendering and export traps (all actually hit)
 
-1. **matplotlib 每个颜色一个 Poly3DCollection → 最后一个颜色糊住全部**。它只在 collection 内部做深度排序，跨 collection 没有。必须合成**一个** collection，用 per-face facecolors + `zsort="average"`
-2. **不要先自己把顶点投影好再调 `view_init()`** —— 会二次投影，得到一个像是从顶上俯视的 90° 错视图。直接喂世界坐标，让 `view_init` 干活
-3. **matplotlib 方位角约定**：相机在 `(cos(az)cos(elev), sin(az)cos(elev), sin(elev))`。角色正面朝 +Y 时用 `az=90` 看正面。**左右是镜像的**（相当于面对面看人）——如果参考图的左右不对称必须一致，就把模型在 X 上翻一下
-4. **`trimesh.creation.capsule()` 的参数是 `count=[n1, n2]`，没有 `sections`**。传 `sections` 会报 `revolve() got multiple values for keyword argument 'sections'`
-5. **`<basematerials>` 在 Bambu Studio 里根本不生效** —— 这个坑伪装成"成功了"：3MF 结构合法、`--info` 读出 `manifold = yes`、切片器正常载入几何，**但颜色全丢**，对象名也从 `03_body` 退化成 `Object_3`。
-   - 唯一被 Bambu 读的是 **`Metadata/model_settings.config`**；每个对象里的 `<metadata key="extruder" value="N">` 就是**耗材槽位号（1 起）**。写了它，对象名和槽位都能带进切片器（用它的导出器做回环验证过）
-   - **别试图内嵌 `Metadata/project_settings.config`**：Bambu 保留自己的预设、把你的丢掉——回环测试里 `filament_colour` 还是它的默认 `#00AE42`。**不要假装交付打印参数**：交付几何 + 名字 + 槽位号，让用户按文档顺序上料
-   - `<basematerials>` 仍然写（OrcaSlicer 等读它），但**不能指望它**。由此推论：**槽位顺序是交付契约的一部分**，调用方必须显式给出色序，不能靠"首次出现顺序"碰运气
-6. **导出后必须做结构校验**，但那只证明"是个合法 zip/XML"，**不证明切片器认得**。真正的验收是拿切片器自己的内核跑：
+1. **One Poly3DCollection per color in matplotlib → the last color paints over everything**. Depth sorting happens only within a collection, never across. Merge into **one** collection with per-face facecolors + `zsort="average"`
+2. **Don't project vertices yourself before calling `view_init()`** — it double-projects, producing a 90° wrong view that looks like a bird's-eye shot. Feed world coordinates and let `view_init` do the work
+3. **matplotlib azimuth convention**: the camera sits at `(cos(az)cos(elev), sin(az)cos(elev), sin(elev))`. With the character's front facing +Y, use `az=90` to see the front. **Left and right are mirrored** (like looking at a person face-to-face) — if the reference image's left/right asymmetry must match, flip the model on X
+4. **`trimesh.creation.capsule()` takes `count=[n1, n2]`; there is no `sections`**. Passing `sections` raises `revolve() got multiple values for keyword argument 'sections'`
+5. **`<basematerials>` does nothing in Bambu Studio** — this trap disguises itself as success: the 3MF structure is valid, `--info` reads `manifold = yes`, the slicer loads the geometry, **but all colors are lost**, and object names degrade from `03_body` to `Object_3`.
+   - The only thing Bambu reads is **`Metadata/model_settings.config`**; each object's `<metadata key="extruder" value="N">` is the **filament slot number (1-based)**. Write it, and object names and slots survive into the slicer (round-trip-verified with its own exporter)
+   - **Don't try to embed `Metadata/project_settings.config`**: Bambu keeps its own presets and drops yours — in round-trip tests `filament_colour` stayed its default `#00AE42`. **Don't pretend to deliver print parameters**: deliver geometry + names + slot numbers and let the user load filament in the documented order
+   - Still write `<basematerials>` (OrcaSlicer etc. read it), but **don't count on it**. Corollary: **slot order is part of the delivery contract**; the caller must pass the color order explicitly, not gamble on "order of first appearance"
+6. **Structural validation after export is mandatory, but it only proves "a valid zip/XML", not that the slicer accepts it**. The real acceptance is running the slicer's own engine:
 
    ```bash
-   BambuStudio --info model.3mf          # 逐对象 manifold / number_of_parts
+   BambuStudio --info model.3mf          # per-object manifold / number_of_parts
    BambuStudio --export-3mf rt.3mf --outputdir /tmp/out model.3mf
-   # 再从 rt.3mf 读 Metadata/model_settings.config：名字与 extruder 必须原样回来
+   # then read Metadata/model_settings.config from rt.3mf: names and extruder must come back intact
    ```
 
-   `--info` 的 `number_of_parts` = 每个对象的**连通体个数**，正常应是 1（故意做多件的除外）。配合件第一版报 5，就是五个缩口各自独立、没连成一体——**纯几何检查查不出来，切片器一眼就报**。
-   ⚠️ CLI 是 GUI 程序、**永不退出**，且 macOS 没有 `timeout`：后台起 + `sleep 20` + `kill`。
-   ⚠️ 这两条（`--info` / `--export-3mf`）不需要预设；但**`--slice` 必须带
-   `--load-settings "<machine>.json;<process>.json"` + `--load-filaments "<filament>.json"`**，
-   否则它会停在 `Initializing StaticPrintConfigs` 永久等待（不报错、不产 gcode、退出码 0）。
-   别把它误诊成"GUI 占着单实例锁"。见 `references/warp.md` 第六节与 `weigh_3mf.py` 头注释。
-6b. **别用 `trimesh.load()` 判断"是不是一个连通实体"** —— 它的 STL/3MF 载入路径会合并顶点、删退化面，**修复动作本身把好件的边配对搞坏**：`is_watertight` 变 False，`split()` 编出几十个零体积"碎片"。同一套件实测：载入路径说 10 件里 8 件坏，按文件自带顶点/索引重建（`Trimesh(process=False)`）后 10 件全水密、各 1 个实体，切片器内核同样判 `manifold = yes`。用 `scripts/audit_3mf.py`，并以切片器的 `number_of_parts` 收口。
-6c. **两个实体的端面精确共面 → 布尔产出零体积碎片**。`.stl` 层面看不出、进程内连通性检查也看不出，**只有切片器的 `number_of_parts` 会报**（犄角报 5，其余件都报 1）。凡是"销插进凸台/项圈"的场合，销必须多伸进宿主 **2–3 mm 造成真实重叠**——这和"销根要埋"是同一条红线的两个面。
-7. 目标视觉验证不能只读 bbox 数字 —— **必须看图**。我第一版就是因为只看数字，交出去的是个"眼睛像舷窗、犄角像钉子"的东西
-8. **圆锥/球体躺在板上，接触是"线"不是"面"** —— 任何按"接地面法向向下面积"算稳定性的检测都会对它报 0 或极小值（报"不稳"）。这不是缺陷：小件 + 8 mm brim 完全够，**别为消掉这个报警去改朝向**，改朝向往往会让销朝下、反而打不了
-9. **圆台的"躺平角"对左右两个镜像件会算出不同结果** —— 主轴分解对噪声敏感。做法是只算一件，另一件用 `M = mirror_x @ T @ mirror_x` 复用同一个变换，保证两侧完全对称
-10. **扁/宽件的预览要用俯视，且画幅按真实比例**。`preview.render` 的 `views` 项支持第三个元素 = 仰角（`("top", 90, 74)`）；默认 8° 的侧视里孔和槽什么都看不见。画幅用真实 extents 设 `box_aspect`（下限 0.35），固定立方体把扁件缩成一条缝
-11. **件上的"编号标记"要做成通孔，不要凸点**。同色凸点在俯视渲染和手里都读不出来（顶面法向相同 = 同亮度），而 0.4 mm 的孔径差肉眼分辨不了——**配合校验件上这是唯一能区分档位的东西**。通孔有侧壁阴影 + 透光，俯视一眼可数
+   `--info`'s `number_of_parts` = each object's **connected body count**, normally 1 (deliberately multi-part excepted). The first fit-part version reported 5 — five collar sockets each independent, never merged into one body — **pure geometry checks can't see it; the slicer reports it at a glance**.
+   ⚠️ The CLI is a GUI program and **never exits**, and macOS has no `timeout`: background start + `sleep 20` + `kill`.
+   ⚠️ These two (`--info` / `--export-3mf`) need no presets; but **`--slice` must come with
+   `--load-settings "<machine>.json;<process>.json"` + `--load-filaments "<filament>.json"`**,
+   or it hangs forever at `Initializing StaticPrintConfigs` (no error, no gcode, exit code 0).
+   Don't misdiagnose it as "the GUI holds the single-instance lock". See `references/warp.md` section 6 and the `weigh_3mf.py` header comment.
+6b. **Don't use `trimesh.load()` to judge "one connected solid"** — its STL/3MF load paths merge vertices and drop degenerate faces, and **the repair itself wrecks edge pairing on good parts**: `is_watertight` goes False, `split()` invents dozens of zero-volume "fragments". Same kit, measured: the load path called 8 of 10 parts broken; rebuilt from each file's own vertices/indices (`Trimesh(process=False)`), all 10 were watertight, one solid each, and the slicer engine likewise judged `manifold = yes`. Use `scripts/audit_3mf.py`, and close with the slicer's `number_of_parts`.
+6c. **Two solids' end faces exactly coplanar → the boolean produces zero-volume fragments**. Invisible at the `.stl` level, invisible to in-process connectivity checks, **only the slicer's `number_of_parts` flags it** (horn reported 5, every other part 1). Wherever "a pin inserts into a boss/collar", the pin must extend **2–3 mm further into the host** to create real overlap — the same red line as "bury the pin root", seen from the other side.
+7. Visual verification cannot be bbox numbers only — **you must look at the image**. The first version shipped "eyes like portholes, horns like nails" because only numbers were read
+8. **Cones/spheres lying on the plate contact along a "line", not an "area"** — any stability check that computes "downward-facing ground area" reports 0 or near-0 for them (i.e. "unstable"). Not a defect: small part + 8 mm brim is plenty. **Don't change the orientation to silence this alarm** — the new orientation often points the pin down and makes it unprintable
+9. **A frustum's "lying angle" computes differently for the two mirrored parts** — principal-axis decomposition is noise-sensitive. Compute one part only, and reuse the same transform for the other with `M = mirror_x @ T @ mirror_x` so both sides are exactly symmetric
+10. **Flat/wide parts need a top-down preview at true-aspect framing**. `preview.render`'s `views` entries accept a third element = elevation (`("top", 90, 74)`); in the default 8° side view, holes and slots are invisible. Set `box_aspect` from real extents (floor 0.35); a fixed cube squeezes flat parts into a slit
+11. **"Number markers" on parts go as through-holes, not bumps**. Same-color bumps are unreadable in top-down renders and in hand (same top normal = same brightness), and a 0.4 mm diameter difference is beyond the eye — **on fit coupons this is the only thing that distinguishes grades**. Through-holes cast wall shadows + transmit light; countable at a glance from above
 
-## 交付物清单
+## Deliverables
 
-- 主文件：`.3mf`，**必须带 `Metadata/model_settings.config`**（对象名 + 耗材槽位），带 `<basematerials>` 但不指望它
-- 备份：每色一个 `.stl`（导入时选"作为一个对象载入多部件"）
-- 单色版：全部合并的 `.stl`
-- 预览：四视图 `.png`（扁件用俯视）
-- 脚本：建模 / 导出 / 渲染三条命令可重跑
-- `README.md`：文件清单、规格、配色表、切片参数、缩放下限、已知取舍、**版权说明**、**打开时会不会弹"配置无效"以及耗材该按什么顺序上料**
-- 拆件/免胶路线另需：件清单表（件号 / 颜色 / 打印尺寸 / 估重 / 接口）、装配顺序、装配态四视图、**配合校验件（带档位标记）**
-- 验收记录：切片器内核的 `--info` 结果（`manifold` / `number_of_parts`）+ 导出回环核对名字与槽位
+- Main file: `.3mf`, **must carry `Metadata/model_settings.config`** (object names + filament slots), with `<basematerials>` present but not relied on
+- Backup: one `.stl` per color (import with "load multiple parts as one object")
+- Single-color version: fully merged `.stl`
+- Preview: four-view `.png` (top-down for flat parts)
+- Scripts: the three commands for modeling / export / rendering, re-runnable
+- `README.md`: file list, specs, color table, slicer settings, minimum scale, known tradeoffs, **copyright note**, **whether the config-invalid popup appears on open, and in what order to load filaments**
+- Color-split / glue-free routes additionally: parts table (part no. / color / print size / est. weight / joint), assembly order, assembled-state four views, **fit coupon (with grade markers)**
+- Acceptance record: the slicer engine's `--info` output (`manifold` / `number_of_parts`) + export round-trip verifying names and slots
