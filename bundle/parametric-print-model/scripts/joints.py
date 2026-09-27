@@ -37,6 +37,7 @@ from trimesh.transformations import rotation_matrix
 
 __all__ = ["ball_pin", "ball_socket", "snap_skirt", "boss_groove",
            "taper_pin", "taper_hole", "press_peg", "press_hole",
+           "bead_peg", "bead_hole", "bead_strain",
            "annulus", "check", "JOINT_S", "JOINT_XS", "JOINT_XXS"]
 
 # --- stock sizes -------------------------------------------------------------
@@ -296,17 +297,121 @@ def press_peg(seat, d, r, length, bury=1.5, chamfer=0.6):
 
 
 def press_hole(seat, d, r, length, clearance=0.15):
-    """Female half as a NEGATIVE solid.  `clearance` may be NEGATIVE for a
-    deliberate interference fit — 0.05-0.10 mm on the radius is what an FDM
-    printer resolves repeatably; do not ask for less.
+    """Female half as a NEGATIVE solid.  The bore is over-cut 1 mm OUTSIDE the
+    seat so it always opens on the surface instead of leaving a skin.
 
-    The bore is over-cut 1 mm OUTSIDE the seat so it always opens on the
-    surface instead of leaving a skin.
+    MEASURED, NOT THEORISED -- `clearance` may be negative, but a negative one
+    is not a "press fit", it is a jam.  A delivered kit used clearance=-0.10
+    (bore 0.20 smaller than the pin on the diameter) on three joints; the user's
+    report on the physical parts was:
+
+        手臂 -> 手掌   Ø4.60 pin into Ø4.40 bore   "完全插不上去" (cut it off to assemble)
+        瞳孔 -> 眼片   Ø4.00 pin into Ø3.80 bore   "差一点点"
+        耳鳍 -> 身体   Ø6.00 pin into Ø5.80 bore   (not reached yet; same defect)
+
+    Two independent reasons, both arithmetic and both visible before printing:
+
+      1. Effective interference is not the CAD number.  The bore prints small
+         (nozzle squish, and elephant foot where it opens onto the bed) and the
+         pin prints fat, so -0.10 on the radius lands near 0.45 mm on the
+         diameter -- ~10 % of a Ø4.6 pin, times three pins that must all start
+         at once.
+      2. THE PIN WAS LONGER THAN THE BORE.  This helper now makes
+         `length + 2.4`, of which 1.0 sits outside the seat, so usable depth is
+         `length + 1.4` -- 0.8 mm more than press_peg's `length + 0.6`
+         protrusion.  (It used to make `length + 1.8` = `length + 0.8` usable,
+         only 0.2 mm of margin; the joint that bottoms out can never close,
+         however loose the fit.)
+
+    So: keep the pin CLEARANCE in the bore (0.10-0.15 per side), keep 0.8 mm of
+    axial margin, and if the joint has to hold, get the retention from an
+    elastic bead on the MALE half -- see bead_peg().
     """
     d = _u(d)
-    L = length + 1.8
+    L = length + 2.4
     return _at(cylinder(radius=r + clearance, height=L, sections=64), seat, d,
                z0=-L / 2.0 + 1.0)
+
+
+# ------------------------------------------------------------------ snap bead
+def bead_peg(seat, d, r_body, length, r_bead=None, cone=1.5, slit_w=0.7,
+             slit_depth=3.4, relief_r=0.9, bead_sink=0.9, bury=2.0):
+    """Male half: clearance body, elastic BEAD near the tip.  The snap.
+
+    Returns a LIST of solids plus a LIST to subtract after the union -- the
+    slits have to cut the bead too, so they cannot go in with the bodies.
+
+    The bead is what holds, and the slits are what make the bead elastic.  A
+    solid bead in a rigid socket yields the socket instead: the joint works once
+    and rattles forever, which is exactly the failure this kit already paid for
+    on the collet-free press pegs.
+
+    Sizing that has held up:
+        r_body  = r_bore - 0.10 .. -0.15      body slides, it never grips
+        r_bead  = r_bore + 0.09 .. +0.13      squeeze at the bead only
+        length  = 4.0 - 5.0                   engagement, above the bead
+        breast  = bead_sink below the cone base
+        slice   = leaf thickness t = (2*r_body - 2*relief_r)/2, and the free
+                  length L = slit_depth - the bead's own half-height
+        strain  = 1.5 * delta * t / L^2  with delta = r_bead - r_bore
+                  keep it under 2 % or the leaves take a set and stop snapping.
+    """
+    d = _u(d)
+    r_bead = float(r_body + 0.22) if r_bead is None else float(r_bead)
+    body = _cyl_span(r_body, seat, d, -bury, length)
+    tip = _at(trimesh.creation.cone(radius=r_body, height=cone, sections=64),
+              seat, d, z0=-length)
+    bead = trimesh.creation.uv_sphere(radius=r_bead, count=[48, 32])
+    bead.apply_transform(align_vectors([0.0, 0.0, 1.0], d))
+    bead.apply_translation(np.asarray(seat, float) + d * (length - bead_sink))
+
+    add = trimesh.boolean.union([body, tip, bead])
+
+    z_lo, z_hi = length - slit_depth, length + cone + 1.0
+    # Wide enough to pass right through the bead, narrow enough not to reach a
+    # NEIGHBOUR peg: on a 3-pin ring of 6.3 mm the next pin is 10.9 mm away, and
+    # a 16 mm-wide box centred here would shave it.  2.8 * r_bead leaves 0.4 mm.
+    big = 2.8 * max(r_bead, 2.5)
+    cut = []
+    # Two crossing slits, built +Z and placed with _at so they follow d.  The
+    # box is symmetric, so swapping x/y is the whole of the 90 deg rotation.
+    for ex in ([slit_w, big, z_hi - z_lo], [big, slit_w, z_hi - z_lo]):
+        box = trimesh.creation.box(extents=ex)
+        cut.append(_at(box, seat, d, z0=-0.5 * (z_lo + z_hi)))
+    cut.append(_cyl_span(relief_r, seat, d, z_lo - 0.4, z_hi))
+    return [add], cut
+
+
+def bead_hole(seat, d, r_body, length, clearance=0.12, mouth=0.8, cone=1.5,
+              groove=None, groove_sink=None):
+    """Female half as NEGATIVE solids: clearance bore + 45 deg mouth.
+
+    `clearance` is positive and stays positive -- the bore matches the peg's
+    BODY, not its bead.  `groove` adds a relief ring (radius) `groove_sink` mm
+    below the seat so the bead can pop into it and lock axially; leave it None
+    for a friction snap that re-opens with a pull.
+
+    Depth is `length + cone + 0.8` on purpose: the 0.8 is the clearance that
+    stops the pin from bottoming out before the faces meet.
+    """
+    d = _u(d)
+    depth = length + cone + 0.8
+    neg = [_cyl_span(r_body + clearance, seat, d, -1.0, depth),
+           _at(trimesh.creation.cone(radius=r_body + clearance + mouth,
+                                     height=mouth, sections=64),
+               seat, d, z0=-mouth + 0.02)]
+    if groove is not None:
+        c = 0.0 if groove_sink is None else groove_sink
+        neg.append(_cyl_span(groove, seat, d, c - 0.7, c + 0.7))
+    return neg
+
+
+def bead_strain(r_body, r_bead, r_bore, relief_r, slit_depth, bead_r=None):
+    """(ok, eps) for the elastic leaves.  Under 2 % or they take a set."""
+    t = r_body - relief_r
+    L = max(slit_depth - (r_bead - r_bore), 0.5)
+    eps = 1.5 * (r_bead - r_bore) * t / (L * L)
+    return eps <= 0.02, eps
 
 
 # ------------------------------------------------------------------ checking

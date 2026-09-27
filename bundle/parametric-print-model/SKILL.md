@@ -46,7 +46,7 @@ metadata:
 > 参考，并在交付说明里写明「别拿去打」。
 
 拆件的四条红线、接合件尺寸表、验收清单见 `references/split-to-print.md`
-（helper `scripts/splitter.py`）；免胶接口（球关节的四个数字、压配的 0.10 mm、
+（helper `scripts/splitter.py`）；免胶接口（球关节的四个数字、**压配柱为什么要滑配+卡珠**、
 四条几何红线、插拔扫掠验证）见 `references/snap-fit.md`（helper `scripts/joints.py`）。
 
 ## 工作流
@@ -88,7 +88,8 @@ metadata:
 - `scripts/threemf.py` — `write_3mf(shells, out, filaments=[(label, hex), ...])`。自建 3MF：`<basematerials>` + 每色一个 `<object>`，**外加 `Metadata/model_settings.config`**（对象名 + 耗材槽位号）—— `basematerials` 在 Bambu Studio 里不生效，那份 config 才是让切片器显示正确名字和槽位的唯一途径。`filaments` 是**交付契约**：它定槽位顺序，用户必须按这个顺序上料。
 - `scripts/preview.py` — 多视图正交预览。`views=[(name, azim[, elev])]`，扁件用 `elev≈74` 看俯视。
 - `scripts/splitter.py` — 拆件专用：`slab`（切装配平面）/ `cyl_d`（按"沿某方向 20→32 mm"指定销与孔）/ `n_components`（按坐标焊接的连通性）/ `footprint`（接地面积 + 重心是否在接地凸包内）/ `footing_margin`（**重心到接地轮廓的带符号余量**，负 = 会翻）/ `overhang_area`（向下的悬垂面积 ≈ 支撑量）/ `lay_flat`（摆平，站不稳 / 接地面 `MIN_CONTACT`=5 mm² 以下时**自动回退**到 `rest_flat`）/ `rest_flat`（**在凸包面里搜真实落座姿态**；判"有没有面贴板"用 `CONTACT_TOL`=0.10 mm，判"重心偏不偏"用 0.6 mm——**两把尺子别混**）/ `upright` / **`orient(spec="face", dirvec)`**（朝向由切片器实测选定时的入口；`dirvec` = **要贴床的那个方向，是叠在 `lay_flat` 之上的增量**——候选是在**已导出的打印姿态 STL** 上判的，当成机架绝对方向会**转两次**）/ `mirror_twin` / `write_kit`（排板 + 导出）/ `write_colour_plates`（**按颜色拆成 N 个单槽 3MF**：`merge={丢: 留}` 并颜色，`names={hex: slug}` 定文件名，返回每盘的件数/板占/估重）
-- `scripts/joints.py` — 免胶接口：`ball_pin`（**开槽弹性夹头**，`bury` 埋入宿主件）/ `ball_socket`（刚性球腔，孔口自动外切 1 mm）/ `press_peg` / `press_hole`（过盈可负）/ `snap_skirt` / `boss_groove` / `taper_pin` / `check`（应变与过盈核算）/ 常数 `JOINT_S` `JOINT_XS` `JOINT_XXS`
+- `scripts/joints.py` — 免胶接口：`ball_pin`（**开槽弹性夹头**，`bury` 埋入宿主件）/ `ball_socket`（刚性球腔，孔口自动外切 1 mm）/ `press_peg` / `press_hole` / **`bead_peg` + `bead_hole`**（滑配销身 + 公头弹性卡珠，**压配柱的正确形态**；`bead_peg` 返回 `(add, cut)`，槽必须在并集之后再减）/ `bead_strain`（叶片应变核算，< 2 %）/ `snap_skirt` / `boss_groove` / `taper_pin` / `check` / 常数 `JOINT_S` `JOINT_XS` `JOINT_XXS`。⚠️ **`press_hole` 的负 clearance 在实物上是"卡死"不是"压配"**，见 `references/snap-fit.md` 的「压配柱：不要用过盈」。
+- `scripts/mate_profile.py` — **装配前必跑（卡珠/压配接口的第三道门禁）**：接 `joints.bead_peg` / `bead_hole`，沿轴量四件事——**体间隙**（销身是不是真能滑进）、**珠握持**（干涉够不够）、**轴向余量**（销会不会先顶到孔底）、**叶片应变**。前两个是径向、**第三个才是真凶**：winston 那次「手臂完全插不进去，被迫把销剪掉」就是销 5.60 打进 5.30 的孔，端面顶死——**顶死的接口，再松也合不拢**，而在 CAD 里它完全看不出来。`python -m scripts.mate_profile`，退出码可当门禁。（踩过的坑：布尔体带 T-junction，截面坐标必须 `np.round(...,4)` 之后环才闭合，否则 `polygonize` 返回 0 个多边形、读数全是 `nan`。）
 - `scripts/test_joints.py` — 改过 `joints.py` 之后必跑：算应变、查水密、**切一片看夹头是不是真的 4 片叶子**、量压配的实际过盈量。`ALL PASS` 才算过。
 - `scripts/warp.py` — **切片前必跑**：量接地面的三个数（`contact` 面积 / `span` 最长连续跨度 / `depth` = 件体积÷接地面积），算 **`lift = span²/depth`**、分档 `ok | brim | redesign`；**同时报 `COM`**（重心到接地轮廓的余量，负 = 会自己翻倒）。退出码可当门禁（ok 0 / brim 1 / redesign 2）。**翘边九成是几何问题，先看这个再动切片参数。**
 - `scripts/overhang.py` — **切片前必跑（跟 warp.py 配一对）**：查**件中部一圈水平台阶**。`warp.py` 只管首层、切片器只管整块脱离的岛，**这两类之间的第三种报废没人管**：台阶上下都连着料、切片器不报警、也不在首层，但那一圈之下是空的，头几层就是往空气里挤丝。实测 winston P2 `01 底座+下身罩` 在 z=21.0 由 Ø28 一步跳到 Ø36（**单层 +4.035 mm 半径 / 406 mm²**），切片器判「无警告」，实物颈口一团丝。判据：watertight 用真实截面的 `area`（新出现悬空面积）+ `span`（离下层最近材料多远 = 真实悬挑跨度）；不封闭退回**只用面积**的 `Δr`（等效半径单层增长）/`ΔA`。退出码 0/2 可当门禁。⚠️ 它**不能**用凸包——凸包会把弯折件的两条肢桥起来（手臂实测凸包报 101.8 mm²/7.04 mm，真实只有 0.01 mm/层）；也**必须**给 `Path3D.to_2D()` 显式传 `plane_transform`，否则每层坐标系都不一样。**修法**：把台阶改成 `ptools.frustum()` 做的 **45° 肩台**（锥台两端都要埋进相邻实体，别让端面落在表面上）。
