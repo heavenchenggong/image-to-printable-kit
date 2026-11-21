@@ -147,9 +147,8 @@ def write_presets(out_dir, printer=D_PRINTER, process=D_PROCESS, filament=None,
     """Flatten the three presets into `out_dir` and report what they resolve to.
 
     Returns a dict with `settings` / `filament` (the CLI arguments), the three
-    paths, and the effective `type` / `density` so callers can print the
-    resolved values.
-    `filament_type` / `density` default to what the chain says -- pass them only
+    paths, and the effective `type` / `density` so callers can print the 口径.
+    `filament_type` / `density` default to what the chain says — pass them only
     to override deliberately.
     """
     os.makedirs(out_dir, exist_ok=True)
@@ -166,6 +165,14 @@ def write_presets(out_dir, printer=D_PRINTER, process=D_PROCESS, filament=None,
 
     rtype, rdensity = resolve_filament(stem, root)
     f = flatten_preset("filament", stem, root)
+    # fan override MUST land on the filament preset too: the CLI's
+    # --load-filaments beats --load-settings' process preset, and the stock
+    # filament chain carries close_fan_the_first_x_layers=['3'] (PETG), so a
+    # process-only override is silently lost -- verified 2026-10-22 with
+    # layer_height=0.24 as a marker (process preset DOES apply) while
+    # close_fan stayed 3. Filament values are per-extruder lists.
+    if fan_layers not in (None, ""):
+        f["close_fan_the_first_x_layers"] = [str(fan_layers)]
     f["filament_type"] = [filament_type or rtype]
     f["filament_density"] = [str(density or rdensity)]
 

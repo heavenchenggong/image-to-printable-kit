@@ -23,10 +23,14 @@ This skill is an **orchestration-layer runbook**: it turns "one image" into a 3M
 | `scripts/overhang.py` | Layer-by-layer overhang scan (catches horizontal steps the slicer never warns about) |
 | `scripts/warp.py` | Large-flat-surface edge-lift gate (`lift = span²/depth` square law) |
 | `scripts/audit_3mf.py` / `weigh_3mf.py` | Connectivity audit / weight re-check in grams |
-| `references/snap-fit.md` | Glue-free snap-fit design rules, four red lines, fit coupon |
+| `references/snap-fit.md` | Glue-free snap-fit design rules, four red lines, fit coupon; clearance budget when the printed part receives off-the-shelf hardware |
 | `references/split-to-print.md` | Orientation verdicts, `warning_message` criteria, convex hull trap |
 | `references/warp.md` | Edge-lift criteria and redesign line |
-| `references/printability-checklist.md` / `delivery.md` | Printability checklist / delivery spec |
+| `references/printability-checklist.md` / `delivery.md` | Printability checklist (incl. short/flat parts) / delivery spec, eight bake pitfalls |
+| `references/cases.md` | **Index first**: five modelled cases, the four costly reprints, and the defaults they changed |
+| `references/mechanisms.md` + `scripts/reveal_slider.py` | Moving mechanism: four-layer reveal slider; sizing calculator checks the three identities |
+| `references/organic-thin.md` + `scripts/telescoping_taper.py` | Print-in-place telescoping taper calculator; thin-organic-part pose / feature-size rules |
+| `references/modeling-pitfalls.md` | 23 modelling and measurement pitfalls |
 
 Environment: use `~/.workbuddy/binaries/python/envs/default/bin/python` for python (numpy/trimesh/shapely/scipy/matplotlib/PIL all live there). Slicer = Bambu Studio CLI (the GUI binary, **never exits**, no `timeout` on macOS — poll for output then `killpg`).
 
